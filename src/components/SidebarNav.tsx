@@ -20,6 +20,9 @@ import {
   CheckCircle2,
   Menu,
   X,
+  Search,
+  Archive,
+  Trash2,
 } from 'lucide-react';
 import type {
   ConversationThread,
@@ -46,6 +49,8 @@ interface SidebarNavProps {
   activeConversationId: string | null;
   onSelectConversation: (id: string) => void;
   onNewConversation: () => void;
+  onArchiveConversation?: (id: string, archived: boolean) => void;
+  onDeleteConversation?: (id: string) => void;
 }
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'spark_sidebar_collapsed';
@@ -67,6 +72,8 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   activeConversationId,
   onSelectConversation,
   onNewConversation,
+  onArchiveConversation,
+  onDeleteConversation,
 }) => {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -76,6 +83,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     }
   });
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [convSearchQuery, setConvSearchQuery] = useState('');
+  const [showArchivedConvs, setShowArchivedConvs] = useState(false);
+  const [convPageSize, setConvPageSize] = useState(8);
 
   useEffect(() => {
     try {
@@ -316,18 +326,17 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     </div>
   );
 
-  // Phase 8 strict visibility rule:
-  // ONLY display a PayPal balance beside the user profile when a PayPal account is actively linked (`connected`).
-  // Never display a fake/default $500.00 or $0.00 balance when PayPal is not linked, disconnected, expired, or revoked.
-  const shouldDisplayPayPalBalance =
-    (isPayPalConnected || accountBalance?.visible === true) &&
-    accountBalance?.visible !== false &&
-    accountBalance?.status !== 'not_connected';
+  // Mission Requirement 7: Remove Account-Side Balance Display
+  // Keep account menu clean and professional; balance records remain in the authoritative billing section.
+  const shouldDisplayPayPalBalance = false;
 
-  const multiCurrencyEntries =
-    shouldDisplayPayPalBalance && Array.isArray(accountBalance?.currencies)
-      ? accountBalance.currencies
-      : [];
+  const multiCurrencyEntries: Array<{
+    currency: string;
+    availableBalance: number;
+    formattedAvailableBalance: string;
+    withheldBalance: number;
+    currencySymbol: string;
+  }> = [];
 
   const renderBalanceBadge = (compactMode = false) => {
     if (!shouldDisplayPayPalBalance) {
@@ -708,39 +717,181 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           })}
         </nav>
 
-        {/* Recent Conversations */}
+        {/* Recent Conversations with Search, Archive Filter & Pagination */}
         {!collapsed && conversations.length > 0 && (
-          <div className="pt-3 border-t border-white/[0.07] space-y-1.5">
-            <div className="px-2.5 text-[10px] font-mono uppercase tracking-wider text-zinc-500">
-              {labels.recentSparks}
+          <div className="pt-3 border-t border-white/[0.07] space-y-2">
+            <div className="flex items-center justify-between px-2">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
+                {labels.recentSparks}
+              </span>
+              <div className="inline-flex items-center rounded-lg bg-zinc-900 border border-white/[0.08] p-0.5 text-[10px]">
+                <button
+                  type="button"
+                  data-testid="sidebar-conv-tab-active"
+                  onClick={() => {
+                    setShowArchivedConvs(false);
+                    setConvPageSize(8);
+                  }}
+                  className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                    !showArchivedConvs
+                      ? 'bg-violet-500/25 text-violet-200 font-semibold'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Active ({conversations.filter((c) => !c.archived).length})
+                </button>
+                <button
+                  type="button"
+                  data-testid="sidebar-conv-tab-archived"
+                  onClick={() => {
+                    setShowArchivedConvs(true);
+                    setConvPageSize(8);
+                  }}
+                  className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                    showArchivedConvs
+                      ? 'bg-amber-500/25 text-amber-200 font-semibold'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Archived ({conversations.filter((c) => Boolean(c.archived)).length})
+                </button>
+              </div>
             </div>
-            <div className="space-y-1">
-              {conversations.slice(0, 8).map((conv) => {
-                const isCurrent =
-                  conv.id === activeConversationId &&
-                  activeSection === 'conversation';
-                return (
+
+            {/* Conversation Search Input */}
+            <div className="px-1">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  data-testid="sidebar-conv-search-input"
+                  value={convSearchQuery}
+                  onChange={(e) => {
+                    setConvSearchQuery(e.target.value);
+                    setConvPageSize(8);
+                  }}
+                  placeholder="Search conversations..."
+                  aria-label="Search conversation history"
+                  className="w-full pl-8 pr-6 py-1.5 rounded-xl bg-zinc-900/90 border border-white/[0.08] text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-violet-400/50"
+                />
+                {convSearchQuery && (
                   <button
-                    key={conv.id}
                     type="button"
-                    onClick={() => onSelectConversation(conv.id)}
-                    title={conv.title}
-                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-left transition-all truncate cursor-pointer ${
-                      isCurrent
-                        ? 'bg-white/[0.08] text-white font-medium border border-white/[0.1]'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border border-transparent'
-                    }`}
+                    onClick={() => setConvSearchQuery('')}
+                    aria-label="Clear conversation search"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer"
                   >
-                    <MessageSquare
-                      className={`w-3.5 h-3.5 shrink-0 ${
-                        isCurrent ? 'text-violet-400' : 'text-zinc-500'
-                      }`}
-                    />
-                    <span className="truncate">{conv.title}</span>
+                    <X className="w-3 h-3" />
                   </button>
-                );
-              })}
+                )}
+              </div>
             </div>
+
+            {(() => {
+              const qLower = convSearchQuery.trim().toLowerCase();
+              const filteredConvs = conversations.filter((c) => {
+                const archiveMatch = showArchivedConvs
+                  ? Boolean(c.archived)
+                  : !c.archived;
+                if (!archiveMatch) return false;
+                if (!qLower) return true;
+                const titleMatch = c.title.toLowerCase().includes(qLower);
+                const turnMatch = (c.turns || []).some((t) =>
+                  t.userPrompt.toLowerCase().includes(qLower)
+                );
+                return titleMatch || turnMatch;
+              });
+
+              const visibleConvs = filteredConvs.slice(0, convPageSize);
+
+              if (filteredConvs.length === 0) {
+                return (
+                  <div className="px-2.5 py-3 text-[11px] text-zinc-500 text-center">
+                    {convSearchQuery
+                      ? 'No conversations match your search.'
+                      : showArchivedConvs
+                        ? 'No archived conversations.'
+                        : 'No active conversations yet.'}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-1">
+                  {visibleConvs.map((conv) => {
+                    const isCurrent =
+                      conv.id === activeConversationId &&
+                      activeSection === 'conversation';
+                    return (
+                      <div
+                        key={conv.id}
+                        className={`group flex items-center justify-between gap-1 px-2 py-1.5 rounded-xl text-xs transition-all ${
+                          isCurrent
+                            ? 'bg-white/[0.08] text-white font-medium border border-white/[0.1]'
+                            : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border border-transparent'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onSelectConversation(conv.id)}
+                          title={conv.title}
+                          className="flex-1 min-w-0 flex items-center gap-2 text-left truncate cursor-pointer"
+                        >
+                          <MessageSquare
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              isCurrent ? 'text-violet-400' : 'text-zinc-500'
+                            }`}
+                          />
+                          <span className="truncate">{conv.title}</span>
+                        </button>
+
+                        <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                          {onArchiveConversation && (
+                            <button
+                              type="button"
+                              data-testid={`sidebar-archive-conv-${conv.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onArchiveConversation(conv.id, !conv.archived);
+                              }}
+                              title={conv.archived ? 'Unarchive' : 'Archive'}
+                              className="p-1 rounded-lg hover:bg-white/[0.08] text-zinc-400 hover:text-amber-300 cursor-pointer"
+                            >
+                              <Archive className="w-3 h-3" />
+                            </button>
+                          )}
+                          {onDeleteConversation && (
+                            <button
+                              type="button"
+                              data-testid={`sidebar-delete-conv-${conv.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteConversation(conv.id);
+                              }}
+                              title="Delete conversation"
+                              className="p-1 rounded-lg hover:bg-rose-500/15 text-zinc-400 hover:text-rose-300 cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {filteredConvs.length > convPageSize && (
+                    <button
+                      type="button"
+                      data-testid="sidebar-conv-load-more-btn"
+                      onClick={() => setConvPageSize((prev) => prev + 8)}
+                      className="w-full py-1.5 px-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-[11px] font-mono text-violet-300 text-center transition-colors cursor-pointer"
+                    >
+                      Show more ({filteredConvs.length - convPageSize} remaining)
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

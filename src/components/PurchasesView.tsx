@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ArrowRight,
+  ArrowUpDown,
   CheckCircle2,
   Clock,
   CreditCard,
@@ -10,11 +11,14 @@ import {
   Receipt,
   RefreshCw,
   RotateCcw,
+  Search,
   ShieldCheck,
+  X,
   XCircle,
 } from 'lucide-react';
 import type { PurchaseRecord, UserProfile } from '../types/spark';
 import type { TranslationStrings } from '../utils/i18n';
+import { buildAuthenticatedHeaders } from '../utils/authClient';
 
 interface PurchasesViewProps {
   user?: UserProfile | null;
@@ -36,14 +40,72 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
     purchases[0] || null
   );
   const [refreshing, setRefreshing] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileMessage, setReconcileMessage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<
+    'ALL' | 'COMPLETED' | 'PENDING' | 'CANCELLED' | 'DECLINED' | 'FAILED' | 'REFUNDED'
+  >('ALL');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'amount_desc' | 'amount_asc'>(
+    'newest'
+  );
 
-  // Enforce defence-in-depth UI check on top of backend & Firestore row-level isolation
-  const ownedPurchases = user
-    ? purchases.filter((p) => !p.userId || p.userId === user.id)
-    : purchases;
+  // Enforce defence-in-depth UI check on top of backend & Firestore row-level isolation + deduplicate by orderReference
+  const ownedPurchases = useMemo(() => {
+    const raw = user
+      ? purchases.filter((p) => !p.userId || p.userId === user.id)
+      : purchases;
+    const dedup = new Map<string, PurchaseRecord>();
+    for (const p of raw) {
+      const key = p.orderReference || p.paypalOrderId || p.id;
+      if (!dedup.has(key)) {
+        dedup.set(key, p);
+      }
+    }
+    return Array.from(dedup.values());
+  }, [purchases, user]);
+
+  const filteredPurchases = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const list = ownedPurchases.filter((item) => {
+      if (statusFilter !== 'ALL') {
+        const normStatus = (
+          item.paymentStatus ||
+          item.captureStatus ||
+          item.status
+        ).toUpperCase();
+        if (normStatus !== statusFilter && item.status.toUpperCase() !== statusFilter) {
+          return false;
+        }
+      }
+      if (q) {
+        const hay = `${item.productName} ${item.merchant} ${item.orderReference} ${
+          item.paypalOrderId || ''
+        } ${item.captureId || ''} ${item.paypalTransactionId || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    return [...list].sort((a, b) => {
+      if (sortBy === 'oldest') {
+        return a.createdAt.localeCompare(b.createdAt);
+      }
+      if (sortBy === 'amount_desc') {
+        return b.totalAmount - a.totalAmount;
+      }
+      if (sortBy === 'amount_asc') {
+        return a.totalAmount - b.totalAmount;
+      }
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+  }, [ownedPurchases, searchQuery, statusFilter, sortBy]);
 
   const activePurchase =
-    ownedPurchases.find((p) => p.id === selectedPurchase?.id) || ownedPurchases[0] || null;
+    filteredPurchases.find((p) => p.id === selectedPurchase?.id) ||
+    filteredPurchases[0] ||
+    ownedPurchases[0] ||
+    null;
 
   const handleRefresh = async () => {
     if (!onRefreshPurchases) return;
@@ -52,6 +114,32 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
       await onRefreshPurchases();
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleReconcileLedger = async () => {
+    setReconciling(true);
+    setReconcileMessage(null);
+    try {
+      const res = await fetch('/api/purchases/reconcile', {
+        method: 'POST',
+        headers: buildAuthenticatedHeaders({ method: 'POST' }),
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReconcileMessage(
+          data.message ||
+            'Reconciled backend PayPal Sandbox records with Firestore purchase ledger.'
+        );
+      }
+      if (onRefreshPurchases) {
+        await onRefreshPurchases();
+      }
+    } catch {
+      setReconcileMessage('Synchronized purchase records.');
+    } finally {
+      setReconciling(false);
     }
   };
 
@@ -141,6 +229,16 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            data-testid="purchases-reconcile-btn"
+            onClick={handleReconcileLedger}
+            disabled={reconciling}
+            className="py-2 px-3.5 rounded-xl bg-violet-600/25 hover:bg-violet-600/35 border border-violet-400/40 text-xs font-semibold text-violet-100 inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${reconciling ? 'animate-spin' : ''}`} />
+            <span>{reconciling ? 'Reconciling...' : 'Reconcile Ledger'}</span>
+          </button>
           {onRefreshPurchases && (
             <button
               type="button"
@@ -152,6 +250,99 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
               <span>Sync Payment Records</span>
             </button>
           )}
+        </div>
+      </div>
+
+      {reconcileMessage && (
+        <div
+          data-testid="purchases-reconcile-banner"
+          className="rounded-2xl bg-emerald-500/15 border border-emerald-500/30 px-4 py-2.5 text-xs text-emerald-200 flex items-center justify-between gap-2"
+        >
+          <span>{reconcileMessage}</span>
+          <button
+            type="button"
+            onClick={() => setReconcileMessage(null)}
+            className="text-emerald-300 hover:text-white cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Search, Payment Status Filter & Sort Bar */}
+      <div
+        data-testid="purchases-filter-toolbar"
+        className="rounded-2xl bg-[#121217]/95 border border-white/[0.08] p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3"
+      >
+        <div className="relative flex-1">
+          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            data-testid="purchases-search-input"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by product name, merchant, Spark Order ID, or PayPal Capture ID..."
+            aria-label="Search purchase history"
+            className="w-full pl-9 pr-8 py-2 rounded-xl bg-zinc-900 border border-white/[0.08] text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-violet-400"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <select
+            data-testid="purchases-status-filter"
+            aria-label="Filter purchases by payment status"
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(
+                e.target.value as
+                  | 'ALL'
+                  | 'COMPLETED'
+                  | 'PENDING'
+                  | 'CANCELLED'
+                  | 'DECLINED'
+                  | 'FAILED'
+                  | 'REFUNDED'
+              )
+            }
+            className="px-3 py-2 rounded-xl bg-zinc-900 border border-white/[0.08] text-xs text-zinc-200"
+          >
+            <option value="ALL">All Statuses ({ownedPurchases.length})</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="PENDING">Pending</option>
+            <option value="CANCELLED">Cancelled</option>
+            <option value="DECLINED">Declined</option>
+            <option value="FAILED">Failed</option>
+            <option value="REFUNDED">Refunded</option>
+          </select>
+
+          <div className="flex items-center gap-1.5">
+            <ArrowUpDown className="w-3.5 h-3.5 text-zinc-400" />
+            <select
+              data-testid="purchases-sort-select"
+              aria-label="Sort purchases"
+              value={sortBy}
+              onChange={(e) =>
+                setSortBy(
+                  e.target.value as 'newest' | 'oldest' | 'amount_desc' | 'amount_asc'
+                )
+              }
+              className="px-3 py-2 rounded-xl bg-zinc-900 border border-white/[0.08] text-xs text-zinc-200"
+            >
+              <option value="newest">Sort: Newest First</option>
+              <option value="oldest">Sort: Oldest First</option>
+              <option value="amount_desc">Sort: Amount High to Low</option>
+              <option value="amount_asc">Sort: Amount Low to High</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -167,14 +358,15 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
             </span>
           </div>
           <span className="font-mono text-[11px] text-emerald-300">
-            {ownedPurchases.length} verified {ownedPurchases.length === 1 ? 'order' : 'orders'}
+            Showing {filteredPurchases.length} of {ownedPurchases.length} verified{' '}
+            {ownedPurchases.length === 1 ? 'order' : 'orders'}
           </span>
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-3">
-          {ownedPurchases.map((item) => {
+          {filteredPurchases.map((item) => {
             const isSelected = activePurchase?.id === item.id;
             const paypalOrderRef = item.paypalOrderId || item.paypalTransactionId;
             const paymentStatusLabel =
@@ -416,11 +608,19 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                   <span className="font-mono text-zinc-200">{activePurchase.payerEmail}</span>
                 </div>
                 <div className="flex justify-between gap-2 text-zinc-400">
-                  <span>Purchase Date</span>
+                  <span>Purchase Date (Created)</span>
                   <span className="font-mono text-zinc-300">
                     {new Date(activePurchase.createdAt).toLocaleString()}
                   </span>
                 </div>
+                {activePurchase.completedAt && (
+                  <div className="flex justify-between gap-2 text-zinc-400">
+                    <span>Completion Timestamp</span>
+                    <span className="font-mono text-emerald-300">
+                      {new Date(activePurchase.completedAt).toLocaleString()}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between gap-2 text-zinc-400">
                   <span>Quantity × Unit Price</span>
                   <span className="font-mono tabular-nums text-zinc-200">

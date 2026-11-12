@@ -13,6 +13,7 @@ import type {
   GroundingCitation,
   OrchestrationResponse,
   ProductOffer,
+  RankedProductOffer,
   ScienceCompoundMetadata,
   SourceExecutionReport,
 } from './src/types/spark.ts';
@@ -34,6 +35,15 @@ import {
   type Channel3SafeDiagnostic,
 } from './src/utils/channel3Adapter.ts';
 import { executeSparkProductIntelligenceAgent } from './src/utils/sparkProductIntelligenceAgent.ts';
+import {
+  buildSpokenResponseSummary,
+  executePhase5SevenAgentOrchestrator,
+  extractConstraintHierarchy,
+  getPhase5ObservabilitySummary,
+  normalizeVoiceQuery,
+  parseNaturalLanguageCartCommand,
+  runPhase5TwelveScenarioEvaluationSuite,
+} from './src/utils/sparkPhase5Intelligence.ts';
 import fs from 'node:fs';
 import {
   DEFAULT_PAYPAL_CALLBACK_PATH,
@@ -46,6 +56,8 @@ import {
   PayPalSandboxEngine,
   SPARK_SANDBOX_TEST_CATALOG,
   SparkAuthSessionManager,
+  VERCEL_PREVIEW_APP_URL,
+  isAuthorizedSparkDomain,
   isPlaceholderEnvValue,
   normalizePayPalClientSecret,
   resolvePayPalEnvironmentConfig,
@@ -58,6 +70,8 @@ import {
 } from './src/utils/paypalSandboxService.ts';
 import type {
   FeedicoNormalizedOffer,
+  SavedComparisonRecord,
+  SavedProductRevalidationItem,
   SparkAuthSession,
   UserAccount,
 } from './src/types/spark.ts';
@@ -400,6 +414,7 @@ async function startServer() {
   const authSessionManager = new SparkAuthSessionManager();
   const usersById = new Map<string, UserAccount>();
   const conversationsByUserId = new Map<string, ConversationThread[]>();
+  const savedComparisonsByUserId = new Map<string, SavedComparisonRecord[]>();
   let latestActiveUserId: string | null = null;
 
   const isHttpsRuntime = String(process.env.APP_URL || '').startsWith('https://');
@@ -412,6 +427,7 @@ async function startServer() {
       process.env.APP_URL,
       DEFAULT_PREVIEW_APP_URL,
       DEV_PREVIEW_APP_URL,
+      VERCEL_PREVIEW_APP_URL,
       'http://localhost:3000',
       'http://127.0.0.1:3000',
     ]
@@ -426,11 +442,11 @@ async function startServer() {
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader(
       'Permissions-Policy',
-      'camera=(), microphone=(), payment=(self "https://www.sandbox.paypal.com" "https://www.paypal.com")'
+      'camera=(), microphone=(self), payment=(self "https://www.sandbox.paypal.com" "https://www.paypal.com")'
     );
     res.setHeader(
       'Content-Security-Policy',
-      "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; connect-src 'self' https: wss: ws:; frame-ancestors 'self' https://*.google.com https://*.run.app;"
+      "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; connect-src 'self' https: wss: ws:; frame-ancestors 'self' https://*.google.com https://*.run.app https://*.vercel.app;"
     );
     if (isHttpsRuntime) {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -439,7 +455,18 @@ async function startServer() {
     const origin = req.header('origin')?.trim().replace(/\/+$/, '');
     if (origin) {
       const hostOrigin = `${req.protocol}://${req.get('host') || ''}`.replace(/\/+$/, '');
-      if (allowedOrigins.has(origin) || origin === hostOrigin) {
+      let isTrustedSparkOrigin = allowedOrigins.has(origin) || origin === hostOrigin;
+      if (!isTrustedSparkOrigin && origin.startsWith('https://')) {
+        try {
+          const parsedOrigin = new URL(origin);
+          if (isAuthorizedSparkDomain(parsedOrigin.hostname)) {
+            isTrustedSparkOrigin = true;
+          }
+        } catch {
+          // Ignore malformed origin
+        }
+      }
+      if (isTrustedSparkOrigin) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -611,6 +638,7 @@ async function startServer() {
         users: Array.from(usersById.values()),
         passwordHashes: Array.from(passwordHashesByUserId.entries()),
         conversations: Array.from(conversationsByUserId.entries()),
+        savedComparisons: Array.from(savedComparisonsByUserId.entries()),
         paypalLinking: paypalSandboxEngine.exportAccountLinkingState(),
         subscriptionData: exportAllSubscriptionData(),
       };
@@ -654,6 +682,13 @@ async function startServer() {
         for (const entry of raw.conversations) {
           if (Array.isArray(entry) && typeof entry[0] === 'string' && Array.isArray(entry[1])) {
             conversationsByUserId.set(entry[0], entry[1]);
+          }
+        }
+      }
+      if (Array.isArray(raw.savedComparisons)) {
+        for (const entry of raw.savedComparisons) {
+          if (Array.isArray(entry) && typeof entry[0] === 'string' && Array.isArray(entry[1])) {
+            savedComparisonsByUserId.set(entry[0], entry[1]);
           }
         }
       }
@@ -1648,6 +1683,57 @@ async function startServer() {
     });
   });
 
+  // Authenticated Password Change
+  app.post('/api/auth/password-update', (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const { currentPassword = '', newPassword = '' } = req.body || {};
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      res.status(400).json({
+        ok: false,
+        errorCode: 'weak_password',
+        error: 'New password must be at least 8 characters long.',
+      });
+      return;
+    }
+    const storedHash = passwordHashesByUserId.get(auth.user.id);
+    if (storedHash && !verifyPasswordScrypt(String(currentPassword), storedHash)) {
+      res.status(401).json({
+        ok: false,
+        errorCode: 'invalid_current_password',
+        error: 'The current password provided is incorrect.',
+      });
+      return;
+    }
+    passwordHashesByUserId.set(auth.user.id, hashPasswordScrypt(newPassword));
+    saveRuntimeSnapshot();
+    res.json({
+      ok: true,
+      message: 'Password successfully changed.',
+    });
+  });
+
+  // Authenticated User Account Deletion
+  app.delete('/api/user/delete-account', (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
+    // Clean up all user data
+    usersById.delete(targetUserId);
+    passwordHashesByUserId.delete(targetUserId);
+    conversationsByUserId.delete(targetUserId);
+    savedComparisonsByUserId.delete(targetUserId);
+    authSessionManager.revokeAllUserSessions(targetUserId);
+    refreshTokenManager.revokeAllForUser(targetUserId);
+    deleteUserSubscriptionData(targetUserId);
+    clearSessionCookie(res);
+    saveRuntimeSnapshot();
+    res.json({
+      ok: true,
+      message: 'Your account and personal data have been completely deleted.',
+    });
+  });
+
   // RBAC-Protected Admin Security Monitoring Endpoint
   app.get('/api/admin/security-events', (req, res) => {
     const auth = authenticateRequest(req, res);
@@ -1863,7 +1949,7 @@ async function startServer() {
     if (!auth) return;
     const targetUserId = auth.user.id;
     const convId = req.params.id;
-    const { title, turns } = req.body || {};
+    const { title, turns, archived } = req.body || {};
     const currentList = conversationsByUserId.get(targetUserId) || [];
     const idx = currentList.findIndex((c) => c.id === convId);
     if (idx < 0) {
@@ -1886,6 +1972,7 @@ async function startServer() {
         ? { title: sanitizeTextAgainstXss(title.trim()) }
         : {}),
       ...(Array.isArray(turns) ? { turns } : {}),
+      ...(typeof archived === 'boolean' ? { archived } : {}),
       updatedAt: new Date().toISOString(),
     };
     currentList[idx] = updated;
@@ -1911,6 +1998,95 @@ async function startServer() {
     );
     saveRuntimeSnapshot();
     res.json({ deleted: true, id: convId });
+  });
+
+  // --- STRICTLY AUTHENTICATED & USER-ISOLATED SAVED COMPARISONS ENDPOINTS (`/api/comparisons`) ---
+  app.get('/api/comparisons', (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const list = savedComparisonsByUserId.get(auth.user.id) || [];
+    res.json({ ok: true, comparisons: list });
+  });
+
+  app.post('/api/comparisons', (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
+    const { comparison } = req.body || {};
+    if (
+      !comparison ||
+      !Array.isArray(comparison.products) ||
+      comparison.products.length === 0
+    ) {
+      res.status(400).json({
+        ok: false,
+        error: 'A valid comparison with at least one verified product is required.',
+      });
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const safeId = String(comparison.id || `cmp_${Date.now().toString(36)}`)
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 120);
+    const products = (comparison.products as RankedProductOffer[]).slice(0, 10);
+    const record: SavedComparisonRecord = {
+      id: safeId,
+      userId: targetUserId,
+      title: sanitizeTextAgainstXss(
+        String(comparison.title || `${products[0]?.category || 'Product'} Comparison`),
+        140
+      ),
+      category: sanitizeTextAgainstXss(
+        String(comparison.category || products[0]?.category || 'General'),
+        80
+      ),
+      productIds: products.map((p) => String(p.id)),
+      products,
+      recommendedProductId:
+        typeof comparison.recommendedProductId === 'string'
+          ? comparison.recommendedProductId
+          : products[0]?.id || null,
+      crucibleSummary: sanitizeTextAgainstXss(
+        String(
+          comparison.crucibleSummary ||
+            `Compared ${products.length} verified offers across price, rating, and specifications.`
+        ),
+        1800
+      ),
+      createdAt:
+        typeof comparison.createdAt === 'string' && comparison.createdAt
+          ? comparison.createdAt
+          : nowIso,
+      updatedAt: nowIso,
+    };
+
+    const currentList = savedComparisonsByUserId.get(targetUserId) || [];
+    const existingIdx = currentList.findIndex((c) => c.id === record.id);
+    if (existingIdx >= 0) {
+      currentList[existingIdx] = record;
+    } else {
+      currentList.unshift(record);
+    }
+    savedComparisonsByUserId.set(targetUserId, currentList.slice(0, 50));
+    saveRuntimeSnapshot();
+    res.json({ ok: true, comparison: record, comparisons: savedComparisonsByUserId.get(targetUserId) || [] });
+  });
+
+  app.delete('/api/comparisons/:id', (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
+    const cmpId = req.params.id;
+    const currentList = savedComparisonsByUserId.get(targetUserId) || [];
+    const exists = currentList.some((c) => c.id === cmpId);
+    if (!exists) {
+      res.status(404).json({ ok: false, error: 'Saved comparison not found.' });
+      return;
+    }
+    const nextList = currentList.filter((c) => c.id !== cmpId);
+    savedComparisonsByUserId.set(targetUserId, nextList);
+    saveRuntimeSnapshot();
+    res.json({ ok: true, deleted: true, id: cmpId, comparisons: nextList });
   });
 
   app.put('/api/user/settings', (req, res) => {
@@ -2124,32 +2300,42 @@ async function startServer() {
       if (channel3Ready) {
         try {
           const cleanRawId = item.productId.replace(/^ch3_/, '');
-          const detailResult = await queryChannel3ProductDetail({
+          const detailResult = await queryChannel3ProductDetail(cleanRawId, 'USD', {
             apiKey: channel3ApiKey,
-            productId: cleanRawId,
           });
-          if (detailResult.ok && detailResult.offer) {
+          if (detailResult.offers.length > 0) {
+            const bestDetail = detailResult.offers[0];
             return {
-              price:
-                detailResult.offer.priceStatus === 'verified' ? detailResult.offer.price : null,
-              currency: detailResult.offer.currency,
-              availability: detailResult.offer.availability,
-              merchant: detailResult.offer.merchant,
+              price: bestDetail.priceStatus === 'verified' ? bestDetail.price : null,
+              currency: bestDetail.currency,
+              availability:
+                bestDetail.availability ||
+                (bestDetail.availabilityStatus === 'verified_in_stock'
+                  ? ('in_stock' as const)
+                  : bestDetail.availabilityStatus === 'verified_out_of_stock'
+                  ? ('out_of_stock' as const)
+                  : ('unknown' as const)),
+              merchant: bestDetail.merchant,
               validationSource: 'channel3_api' as const,
               statusMessage: 'Re-verified live via Channel3 Product Detail API.',
             };
           }
           if (item.productUrl && item.productUrl.startsWith('http')) {
-            const urlResult = await queryChannel3UrlLookup({
+            const urlResult = await queryChannel3UrlLookup(item.productUrl, {
               apiKey: channel3ApiKey,
-              url: item.productUrl,
             });
-            if (urlResult.ok && urlResult.offers.length > 0) {
+            if (urlResult.offers.length > 0) {
               const best = urlResult.offers[0];
               return {
                 price: best.priceStatus === 'verified' ? best.price : null,
                 currency: best.currency,
-                availability: best.availability,
+                availability:
+                  best.availability ||
+                  (best.availabilityStatus === 'verified_in_stock'
+                    ? ('in_stock' as const)
+                    : best.availabilityStatus === 'verified_out_of_stock'
+                    ? ('out_of_stock' as const)
+                    : ('unknown' as const)),
                 merchant: best.merchant,
                 validationSource: 'channel3_api' as const,
                 statusMessage: 'Re-verified live via Channel3 URL Lookup API.',
@@ -2164,6 +2350,130 @@ async function startServer() {
       return null;
     };
   };
+
+  // --- SAVED PRODUCTS LIVE CHANNEL3 REVALIDATION ENDPOINT (`/api/saved/revalidate`) ---
+  app.post('/api/saved/revalidate', async (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const rawProducts = Array.isArray(req.body?.products) ? req.body.products : [];
+    const validator = buildChannel3CartValidator();
+    const nowIso = new Date().toISOString();
+    const results: SavedProductRevalidationItem[] = [];
+    const updatedProducts: RankedProductOffer[] = [];
+    const activeOffers = getAllActiveOffers(auth.user.id);
+
+    for (const raw of rawProducts.slice(0, 30)) {
+      if (!raw || typeof raw !== 'object' || !raw.id) continue;
+      const prod = raw as RankedProductOffer;
+      const prevPrice =
+        typeof prod.price === 'number' && prod.priceStatus === 'verified' ? prod.price : null;
+
+      let currentPrice: number | null = prevPrice;
+      let availabilityStatus: RankedProductOffer['availabilityStatus'] =
+        prod.availabilityStatus || 'verified_in_stock';
+      let statusMessage = 'Verified against active session product graph.';
+
+      const liveCheck = await validator({
+        itemId: prod.id,
+        productId: prod.id,
+        productUrl: prod.canonicalUrl || '',
+        sourceId: prod.sourceId || 'channel3_api',
+        unitPrice: prevPrice ?? 0,
+        availability:
+          prod.availabilityStatus === 'verified_out_of_stock' ? 'out_of_stock' : 'in_stock',
+      });
+
+      if (liveCheck) {
+        currentPrice = liveCheck.price !== null ? liveCheck.price : prevPrice;
+        availabilityStatus =
+          liveCheck.availability === 'in_stock'
+            ? 'verified_in_stock'
+            : liveCheck.availability === 'out_of_stock'
+            ? 'verified_out_of_stock'
+            : 'availability_unverified';
+        statusMessage = liveCheck.statusMessage;
+      } else {
+        const sessionMatch = activeOffers.find((o) => o.id === prod.id);
+        if (sessionMatch && sessionMatch.price !== null && sessionMatch.priceStatus === 'verified') {
+          currentPrice = sessionMatch.price;
+          availabilityStatus = sessionMatch.availabilityStatus;
+          statusMessage = 'Re-verified against live session Channel3 offer cache.';
+        }
+      }
+
+      const priceChanged =
+        prevPrice !== null &&
+        currentPrice !== null &&
+        Math.abs(currentPrice - prevPrice) >= 0.01;
+      const priceDelta =
+        prevPrice !== null && currentPrice !== null
+          ? Number((currentPrice - prevPrice).toFixed(2))
+          : null;
+
+      results.push({
+        productId: prod.id,
+        productName: prod.name,
+        merchant: prod.merchant,
+        previousPrice: prevPrice,
+        currentPrice,
+        priceChanged,
+        priceDelta,
+        availabilityStatus,
+        lastValidatedAt: nowIso,
+        statusMessage,
+      });
+
+      updatedProducts.push({
+        ...prod,
+        price: currentPrice,
+        priceStatus: currentPrice !== null ? 'verified' : 'price_could_not_be_verified',
+        availabilityStatus,
+        retrievedAt: nowIso,
+        specs: {
+          ...(prod.specs || {}),
+          'Last Validated At': nowIso,
+          ...(prevPrice !== null ? { 'Previous Price': String(prevPrice) } : {}),
+        },
+      });
+    }
+
+    res.json({
+      ok: true,
+      validatedAt: nowIso,
+      revalidatedCount: results.length,
+      priceChangesCount: results.filter((r) => r.priceChanged).length,
+      findings: results,
+      products: updatedProducts,
+    });
+  });
+
+  // --- PURCHASES LEDGER RECONCILIATION ENDPOINT (`/api/purchases/reconcile`) ---
+  app.post('/api/purchases/reconcile', (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const purchases = paypalSandboxEngine.getUserPurchases(auth.user.id);
+    const transactions = purchases;
+    const completedCount = purchases.filter((p) => p.status === 'completed').length;
+    const pendingCount = purchases.filter((p) => p.status === 'pending').length;
+    const failedOrCancelledCount = purchases.filter(
+      (p) => p.status === 'failed' || p.status === 'cancelled' || p.status === 'declined'
+    ).length;
+
+    res.json({
+      ok: true,
+      reconciledAt: new Date().toISOString(),
+      userId: auth.user.id,
+      purchases,
+      summary: {
+        totalPurchases: purchases.length,
+        totalSandboxTransactions: transactions.length,
+        completedCount,
+        pendingCount,
+        failedOrCancelledCount,
+      },
+      message: `Reconciled ${purchases.length} verified purchase record(s) across ${transactions.length} PayPal Sandbox transaction(s).`,
+    });
+  });
 
   app.get('/api/paypal/catalog', (_req, res) => {
     res.json({
@@ -4414,8 +4724,13 @@ async function startServer() {
     const auth = authenticateRequest(req, res);
     if (!auth) return;
 
-    const { orderIdOrPayPalId, orderId, mockApplicationCode, expectedAmount } =
-      req.body || {};
+    const {
+      orderIdOrPayPalId,
+      orderId,
+      mockApplicationCode,
+      expectedAmount,
+      expectedCurrency,
+    } = req.body || {};
     const targetOrderId =
       typeof orderIdOrPayPalId === 'string' && orderIdOrPayPalId.trim()
         ? orderIdOrPayPalId.trim()
@@ -4438,6 +4753,7 @@ async function startServer() {
       mockApplicationCode:
         typeof mockApplicationCode === 'string' ? mockApplicationCode : undefined,
       expectedAmount: typeof expectedAmount === 'number' ? expectedAmount : undefined,
+      expectedCurrency: typeof expectedCurrency === 'string' ? expectedCurrency : undefined,
       payerEmailOverride: auth.user.email,
     });
     saveRuntimeSnapshot();
@@ -4831,6 +5147,8 @@ async function startServer() {
     const subscriptionPaymentsList = getSubscriptionPayments(targetUserId);
     const dashboardPreferences = getUserDashboardPreferences(targetUserId);
 
+    const savedComparisons = savedComparisonsByUserId.get(targetUserId) || [];
+
     res.json({
       ok: true,
       exportedAt: new Date().toISOString(),
@@ -4841,7 +5159,28 @@ async function startServer() {
       subscriptionPayments: subscriptionPaymentsList,
       purchases,
       conversations,
+      savedComparisons,
       dashboardPreferences,
+    });
+  });
+
+  app.post('/api/user/clear-history', (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
+    const scope = String(req.body?.scope || 'conversations');
+    if (scope === 'conversations' || scope === 'all') {
+      conversationsByUserId.set(targetUserId, []);
+    }
+    if (scope === 'comparisons' || scope === 'all') {
+      savedComparisonsByUserId.set(targetUserId, []);
+    }
+    saveRuntimeSnapshot();
+    res.json({
+      ok: true,
+      scope,
+      clearedAt: new Date().toISOString(),
+      message: `Successfully cleared ${scope} history for your account.`,
     });
   });
 
@@ -4851,6 +5190,7 @@ async function startServer() {
       auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
 
     conversationsByUserId.delete(targetUserId);
+    savedComparisonsByUserId.delete(targetUserId);
     deleteUserSubscriptionData(targetUserId);
     saveRuntimeSnapshot();
 
@@ -4858,7 +5198,7 @@ async function startServer() {
       ok: true,
       deletedUserId: targetUserId,
       deletedAt: new Date().toISOString(),
-      message: 'User conversations, subscription records, usage history, and dashboard preferences have been permanently deleted.',
+      message: 'User conversations, saved comparisons, subscription records, usage history, and dashboard preferences have been permanently deleted.',
     });
   });
 
@@ -5815,19 +6155,30 @@ async function startServer() {
       return;
     }
 
-    const {
+    let {
       prompt = '',
       preferredName = '',
       previousTurnPrompts = [],
       previousPrompts = [],
       allowSecondarySourceFallback = false,
+      isVoiceInput = false,
+      voiceLanguage = 'en',
     }: {
       prompt?: string;
       preferredName?: string;
       previousTurnPrompts?: string[];
       previousPrompts?: string[];
       allowSecondarySourceFallback?: boolean;
+      isVoiceInput?: boolean;
+      voiceLanguage?: string;
     } = req.body || {};
+
+    const voicePayload = isVoiceInput
+      ? normalizeVoiceQuery(prompt, voiceLanguage)
+      : null;
+    if (voicePayload && voicePayload.normalizedTranscript) {
+      prompt = voicePayload.normalizedTranscript;
+    }
 
     const historyPrompts: string[] = [
       ...(Array.isArray(previousTurnPrompts) ? previousTurnPrompts : []),
@@ -5914,6 +6265,9 @@ async function startServer() {
 
     if (intent.responseType === 'general_question') {
       const coordinatorMessage = `${addressAs}, Spark searches live product catalogs (Channel3 Product Graph API, Feedico Partner API, Open Library Catalog API, and NCBI PubChem REST API) to find verified products, compare merchant prices, and check active coupons.`;
+      if (voicePayload) {
+        voicePayload.spokenSummaryText = buildSpokenResponseSummary({ coordinatorMessage });
+      }
 
       const earlyPayload: OrchestrationResponse = {
         requestId: `orch_${Date.now().toString(36)}`,
@@ -5930,9 +6284,154 @@ async function startServer() {
         couponSubsystemState: 'Not queried for general question.',
         groundingCitations: [],
         scienceAnalysis: null,
+        voiceInteraction: voicePayload,
       };
       releaseConcurrency(targetUserId);
       res.json(earlyPayload);
+      return;
+    }
+
+    // 1B. PHASE 5 CONSTRAINT CONTRADICTION CHECK & DIRECT CART OPERATION ROUTING
+    const syntheticHistoryTurns = historyPrompts.map((hp, idx) => ({
+      id: `hist_${idx}`,
+      userPrompt: hp,
+      createdAt: now,
+      status: 'completed' as const,
+      stages: [],
+      response: null,
+      errorMessage: null,
+    }));
+    const initialConstraints = extractConstraintHierarchy(prompt, syntheticHistoryTurns);
+
+    if (initialConstraints.detectedContradictions.length > 0) {
+      const firstContra = initialConstraints.detectedContradictions[0];
+      const phase5Contra = await executePhase5SevenAgentOrchestrator({
+        orchestrationId: `orch_contra_${Date.now().toString(36)}`,
+        prompt,
+        conversationTurns: syntheticHistoryTurns,
+        offers: [],
+        coupons: [],
+        sourceReports: [],
+        report: null,
+        needsClarification: true,
+      });
+      const contraMsg = `To ensure an accurate recommendation, I noticed a conflict in your constraints: **${firstContra.resolutionQuestion}**`;
+      if (voicePayload) {
+        voicePayload.spokenSummaryText = buildSpokenResponseSummary({
+          coordinatorMessage: contraMsg,
+        });
+      }
+      const contraPayload: OrchestrationResponse = {
+        requestId: `orch_${Date.now().toString(36)}`,
+        timestamp: new Date().toISOString(),
+        responseType: 'missing_information',
+        clarificationSuggestions: [
+          `Use ${firstContra.newValue}`,
+          `Keep ${firstContra.previousValue}`,
+        ],
+        followUpClarification: {
+          question: firstContra.resolutionQuestion,
+          whyItMatters: `Conflicting ${firstContra.field} constraints (${firstContra.previousValue} vs. ${firstContra.newValue}) prevent deterministic candidate filtering.`,
+          missingRequirement: 'specifications',
+        },
+        intent,
+        sourceReports: [],
+        agentSteps: [
+          ...agentSteps,
+          {
+            agentId: 'intent',
+            agentName: 'Agent 1 — Contradiction Detection & Constraint Guard',
+            modelUsed: 'gemini-3-flash-preview',
+            status: 'completed',
+            durationMs: Math.max(4, Date.now() - t0),
+            summary: `Detected conflicting constraint on "${firstContra.field}" (${firstContra.previousValue} vs ${firstContra.newValue}).`,
+            details: initialConstraints.detectedContradictions.map((c) => c.resolutionQuestion),
+          },
+        ],
+        coordinatorMessage: contraMsg,
+        explicitFailureStates: [],
+        recommendedProductId: null,
+        offers: [],
+        verifiedCoupons: [],
+        couponSubsystemState: 'Not queried prior to resolving conflicting constraints.',
+        groundingCitations: [],
+        scienceAnalysis: null,
+        phase5SevenAgentContracts: phase5Contra.agentContracts,
+        omegaDecisionCrucible: phase5Contra.omegaCrucible,
+        constraintHierarchy: phase5Contra.constraints,
+        observabilityTelemetry: phase5Contra.observability,
+        voiceInteraction: voicePayload,
+      };
+      releaseConcurrency(targetUserId);
+      res.json(contraPayload);
+      return;
+    }
+
+    // Check if the prompt is a direct Cart operation on existing Cart state (update quantity, remove item, revalidate prices, query payable amount, checkout cart)
+    const parsedCartCmd = parseNaturalLanguageCartCommand(prompt);
+    const isPureCartStateCommand =
+      parsedCartCmd.isShoppingCommand &&
+      (parsedCartCmd.actionType === 'update_cart_quantity' ||
+        parsedCartCmd.actionType === 'remove_from_cart' ||
+        parsedCartCmd.actionType === 'revalidate_cart_prices' ||
+        parsedCartCmd.actionType === 'query_payable_amount' ||
+        parsedCartCmd.actionType === 'checkout_cart');
+
+    if (isPureCartStateCommand && parsedCartCmd.actionType) {
+      if (parsedCartCmd.actionType === 'revalidate_cart_prices') {
+        await paypalSandboxEngine.validateCartItems(verifiedUserId || targetUserId);
+      }
+      const cartExec = paypalSandboxEngine.executeAgentShoppingAction({
+        userId: verifiedUserId || targetUserId,
+        action: parsedCartCmd.actionType,
+        quantity: parsedCartCmd.quantity,
+        targetItemQuery: parsedCartCmd.targetProductQuery,
+        couponCode: parsedCartCmd.couponCode,
+      });
+      if (voicePayload) {
+        voicePayload.spokenSummaryText = buildSpokenResponseSummary({
+          coordinatorMessage: cartExec.message,
+          shoppingExecution: cartExec,
+        });
+      }
+      const cartOnlyPayload: OrchestrationResponse = {
+        requestId: `orch_${Date.now().toString(36)}`,
+        timestamp: new Date().toISOString(),
+        responseType: 'general_question',
+        intent,
+        sourceReports: [],
+        agentSteps: [
+          ...agentSteps,
+          {
+            agentId: 'coordinator',
+            agentName: 'Intelligent Cart & Transaction Safeguard Engine',
+            modelUsed: 'spark-shopping-execution-engine',
+            status: cartExec.action === 'rejected_unverified' ? 'no_verified_results' : 'completed',
+            durationMs: Math.max(5, Date.now() - t0),
+            summary: cartExec.message,
+            details: cartExec.orderSummary
+              ? [
+                  `Items in Cart: ${cartExec.orderSummary.quantity}`,
+                  `Subtotal: ${cartExec.orderSummary.currency} ${cartExec.orderSummary.subtotal.toFixed(2)}`,
+                  `Final Known Payable Total: ${cartExec.orderSummary.currency} ${cartExec.orderSummary.finalKnownTotal.toFixed(2)}`,
+                ]
+              : [cartExec.message],
+          },
+        ],
+        coordinatorMessage: cartExec.message,
+        explicitFailureStates: [],
+        recommendedProductId: null,
+        offers: [],
+        verifiedCoupons: [],
+        couponSubsystemState: 'Direct Cart operation executed.',
+        groundingCitations: [],
+        scienceAnalysis: null,
+        agentShoppingExecution: cartExec,
+        voiceInteraction: voicePayload,
+      };
+      releaseConcurrency(targetUserId);
+      saveRuntimeSnapshot();
+      res.json(cartOnlyPayload);
       return;
     }
 
@@ -6151,19 +6650,88 @@ async function startServer() {
       paypalSandboxEngine.registerVerifiedLiveCoupon(cpn);
     }
 
+    const resolvedRecommendedId =
+      report.finalRecommendation?.recommendedProductId ||
+      agentResult.offers[0]?.id ||
+      null;
+    const primaryVerifiedOffer =
+      agentResult.offers.find((o) => o.id === resolvedRecommendedId) ||
+      agentResult.offers[0] ||
+      null;
+
+    // Detect natural-language shopping & Cart commands (Add to Cart / Update Qty / Remove / Compare with Cart / Apply Coupon / Revalidate / Query Total / Buy / Checkout Cart)
+    let agentShoppingExecution = null;
+    if (parsedCartCmd.isShoppingCommand && parsedCartCmd.actionType) {
+      agentShoppingExecution = paypalSandboxEngine.executeAgentShoppingAction({
+        userId: verifiedUserId || targetUserId,
+        action: parsedCartCmd.actionType,
+        product: primaryVerifiedOffer,
+        quantity: parsedCartCmd.quantity,
+        targetItemQuery: parsedCartCmd.targetProductQuery,
+        couponCode: parsedCartCmd.couponCode,
+        availableCoupons: agentResult.verifiedCoupons,
+      });
+
+      agentSteps.push({
+        agentId: 'coordinator',
+        agentName: 'AI Shopping Execution & Explicit Consent Gate',
+        modelUsed: 'spark-shopping-execution-engine',
+        status:
+          agentShoppingExecution.action === 'rejected_unverified'
+            ? 'no_verified_results'
+            : 'completed',
+        durationMs: Math.max(6, Date.now() - t0),
+        summary: agentShoppingExecution.message,
+        details: agentShoppingExecution.orderSummary
+          ? [
+              `Product: ${agentShoppingExecution.orderSummary.productName} (${agentShoppingExecution.orderSummary.merchant})`,
+              `Quantity & Unit Price: ${agentShoppingExecution.orderSummary.quantity} × ${agentShoppingExecution.orderSummary.currency} ${agentShoppingExecution.orderSummary.unitPrice.toFixed(2)}`,
+              `Final Known Total: ${agentShoppingExecution.orderSummary.currency} ${agentShoppingExecution.orderSummary.finalKnownTotal.toFixed(2)}`,
+              `Consent Gate: Explicit user confirmation required (never auto-authorized)`,
+            ]
+          : [agentShoppingExecution.rejectionReason || agentShoppingExecution.message],
+      });
+    }
+
+    // Execute Phase 5 Coordinated Seven-Agent Contracts & Omega Decision Crucible
+    const reqId = `orch_${Date.now().toString(36)}`;
+    const phase5Result = await executePhase5SevenAgentOrchestrator({
+      orchestrationId: reqId,
+      prompt,
+      conversationTurns: syntheticHistoryTurns,
+      offers: agentResult.offers,
+      coupons: agentResult.verifiedCoupons,
+      sourceReports: agentResult.sourceReports,
+      report,
+      needsClarification: false,
+      adaptiveExpansionTriggered: Boolean(
+        report.searchCoverageDisclosures && report.searchCoverageDisclosures.length > 0
+      ),
+    });
+
+    const finalCoordinatorMessage = agentShoppingExecution
+      ? `${agentResult.coordinatorMessage}\n\n${agentShoppingExecution.message}`
+      : agentResult.coordinatorMessage;
+
+    if (voicePayload) {
+      voicePayload.spokenSummaryText = buildSpokenResponseSummary({
+        coordinatorMessage: finalCoordinatorMessage,
+        report,
+        omegaCrucible: phase5Result.omegaCrucible,
+        shoppingExecution: agentShoppingExecution,
+      });
+    }
+
     const responsePayload: OrchestrationResponse = {
-      requestId: `orch_${Date.now().toString(36)}`,
+      requestId: reqId,
       timestamp: new Date().toISOString(),
       responseType: intent.responseType || 'product_search',
       intent,
       sourceReports: agentResult.sourceReports,
       agentSteps,
-      coordinatorMessage: agentResult.coordinatorMessage,
+      coordinatorMessage: finalCoordinatorMessage,
       explicitFailureStates: Array.from(explicitFailureStates),
-      recommendedProductId:
-        report.finalRecommendation?.recommendedProductId ||
-        agentResult.offers[0]?.id ||
-        null,
+      recommendedProductId: resolvedRecommendedId,
       offers: agentResult.offers,
       verifiedCoupons: agentResult.verifiedCoupons,
       couponSubsystemState:
@@ -6173,6 +6741,12 @@ async function startServer() {
       groundingCitations,
       scienceAnalysis: agentResult.scienceAnalysis,
       productIntelligenceReport: report,
+      agentShoppingExecution,
+      phase5SevenAgentContracts: phase5Result.agentContracts,
+      omegaDecisionCrucible: phase5Result.omegaCrucible,
+      constraintHierarchy: phase5Result.constraints,
+      observabilityTelemetry: phase5Result.observability,
+      voiceInteraction: voicePayload,
     };
 
     releaseConcurrency(targetUserId);
@@ -6187,6 +6761,37 @@ async function startServer() {
     saveRuntimeSnapshot();
 
     res.json(responsePayload);
+  });
+
+  // PHASE 5: Voice Mode Normalization & Speech Processing Endpoint
+  app.post('/api/spark/voice/normalize', (req, res) => {
+    const { transcript = '', language = 'en' } = req.body || {};
+    const raw = typeof transcript === 'string' ? transcript.trim().slice(0, 1000) : '';
+    if (!raw) {
+      res.status(400).json({
+        ok: false,
+        errorCode: 'empty_transcript',
+        error: 'No speech transcript was captured. Please try speaking again or type your request.',
+      });
+      return;
+    }
+    const normalized = normalizeVoiceQuery(raw, typeof language === 'string' ? language : 'en');
+    res.json({
+      ok: true,
+      voiceInteraction: normalized,
+    });
+  });
+
+  // PHASE 5: Observability & 12-Scenario Evaluation Endpoint
+  app.get('/api/spark/observability', async (_req, res) => {
+    const observability = getPhase5ObservabilitySummary();
+    const evaluationSuite = await runPhase5TwelveScenarioEvaluationSuite();
+    res.json({
+      ok: true,
+      timestamp: new Date().toISOString(),
+      observability,
+      evaluationSuite,
+    });
   });
 
   app.get('/api/health', (_req, res) => {

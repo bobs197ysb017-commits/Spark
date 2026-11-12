@@ -643,6 +643,14 @@ export interface UserPreferences {
   defaultCurrency: 'USD' | 'EUR' | 'GBP';
   interestTagsConsent?: boolean;
   interestTags?: string[];
+  aiModelTier?: 'fast' | 'balanced' | 'deep';
+  aiComparisonDepth?: 'concise' | 'standard' | 'exhaustive';
+  aiAutoVerifyCitations?: boolean;
+  searchHistoryLoggingConsent?: boolean;
+  notifyPriceDropAlerts?: boolean;
+  notifyCouponExpiryAlerts?: boolean;
+  notifyOrderStatusAlerts?: boolean;
+  regionCountry?: string;
 }
 
 export interface UserProfile {
@@ -698,6 +706,7 @@ export interface SourceExecutionReport {
 
 export type FeedicoOfferClassification =
   | 'verified_active'
+  | 'verified_code'
   | 'no_code_deal'
   | 'unverified'
   | 'expired';
@@ -820,15 +829,17 @@ export interface CouponItem {
   code: string;
   merchant: string;
   sourceId: string;
+  sourceLabel?: string;
   sourceUrl: string;
   retrievedAt: string;
   description: string;
-  discountType: 'percentage' | 'fixed' | 'promotional_deal';
+  discountType: 'percentage' | 'fixed' | 'promotional_deal' | 'unknown';
   discountValue: number;
   minSpend: number;
   currency: 'USD' | 'EUR' | 'GBP';
   verificationStatus: 'verified' | 'coupon_validity_unknown';
-  terms: string;
+  terms?: string;
+  applicableCategories?: string[];
   // Feedico Partner API Extended Fields
   feedicoOfferId?: string;
   merchantId?: string;
@@ -873,28 +884,54 @@ export interface ScienceCompoundMetadata {
 
 export interface ProductOffer {
   id: string;
+  productId?: string;
   offerId?: string;
   sourceId: string;
   sourceName: string;
+  sourceLabel?: string;
+  sourceType?: string;
+  sourceUrl?: string;
   canonicalUrl: string;
   retrievedAt: string;
+  freshnessStatus?: string;
+  verified?: boolean;
+  verificationSummary?: string;
   verificationStatus: 'verified_live_source' | 'partial_fields_unverified';
   name: string;
+  description?: string;
   merchant: string;
   category: string;
   price: number | null;
-  priceStatus: 'verified' | 'price_could_not_be_verified';
+  priceStatus: 'verified' | 'price_could_not_be_verified' | 'unavailable';
   currency: 'USD' | 'EUR' | 'GBP';
+  shippingText?: string | null;
   shippingCost: number | null;
-  shippingStatus: 'verified' | 'not_applicable_digital' | 'unknown';
+  shippingStatus: 'verified' | 'estimated' | 'free' | 'not_applicable_digital' | 'unknown';
   estimatedTaxRate: number | null;
   taxStatus: 'verified' | 'unknown';
-  availabilityStatus: 'verified_in_stock' | 'verified_out_of_stock' | 'unknown';
+  availabilityStatus:
+    | 'verified_in_stock'
+    | 'verified_out_of_stock'
+    | 'availability_unverified'
+    | 'unknown';
   availability?: 'in_stock' | 'out_of_stock' | 'unknown';
   rating: number | null;
   reviewCount: number | null;
+  ratingStatus?: string;
   summary: string;
   specs: Record<string, string>;
+  keySpecs?: string[];
+  pros?: string[];
+  cons?: string[];
+  whyRecommended?: string;
+  valueScore?: number;
+  trustScore?: number;
+  relevanceScore?: number;
+  overallScore?: number;
+  effectivePrice?: number | null;
+  savingsAmount?: number;
+  hasVerifiedCoupon?: boolean;
+  rank?: number;
   couponStatus: 'verified' | 'coupon_validity_unknown' | 'no_verified_coupon';
   checkoutStatus: 'supported_paypal' | 'checkout_unsupported';
   imageUrl: string | null;
@@ -1114,6 +1151,52 @@ export interface ClarificationRequirement {
   options?: string[];
 }
 
+export interface AgentShoppingOrderSummaryPreview {
+  productId: string;
+  productName: string;
+  imageUrl: string | null;
+  merchant: string;
+  productUrl: string | null;
+  quantity: number;
+  unitPrice: number;
+  currency: 'USD' | 'EUR' | 'GBP';
+  subtotal: number;
+  discount: number;
+  shippingCost: number | null;
+  shippingStatus: 'verified' | 'estimated' | 'free' | 'unknown';
+  taxAmount: number | null;
+  taxStatus: 'verified' | 'estimated' | 'unknown';
+  otherKnownFees: number;
+  finalKnownTotal: number;
+  unknownOrUnconfirmedCosts: string[];
+}
+
+export interface AgentShoppingExecutionPayload {
+  action:
+    | 'add_to_cart'
+    | 'prepare_purchase_consent'
+    | 'checkout_cart'
+    | 'update_cart_quantity'
+    | 'remove_from_cart'
+    | 'compare_with_cart'
+    | 'apply_cart_coupon'
+    | 'revalidate_cart_prices'
+    | 'query_payable_amount'
+    | 'clarify_ambiguous_product'
+    | 'rejected_unverified';
+  verifiedProduct: RankedProductOffer | null;
+  quantity: number;
+  cart: UserCartSummary | null;
+  orderSummary: AgentShoppingOrderSummaryPreview | null;
+  requiresExplicitUserConsent: true;
+  autoAuthorized: false;
+  rejectionReason?: string | null;
+  clarificationQuestion?: string | null;
+  comparedAlternative?: RankedProductOffer | null;
+  appliedCouponCode?: string | null;
+  message: string;
+}
+
 export interface OrchestrationResponse {
   requestId: string;
   timestamp: string;
@@ -1135,6 +1218,12 @@ export interface OrchestrationResponse {
   spark2Intelligence?: Spark2IntelligenceReport;
   opalSevenAgentReport?: OpalSevenAgentSystemReport;
   productIntelligenceReport?: ProductIntelligenceReport;
+  agentShoppingExecution?: AgentShoppingExecutionPayload | null;
+  phase5SevenAgentContracts?: SpecialistAgentContract[];
+  omegaDecisionCrucible?: OmegaCrucibleEvaluation;
+  constraintHierarchy?: ConstraintHierarchy;
+  observabilityTelemetry?: OrchestratorObservabilityTelemetry;
+  voiceInteraction?: VoiceInteractionPayload | null;
 }
 
 export interface ProductIntelligenceReport {
@@ -1296,6 +1385,10 @@ export interface ProductIntelligenceReport {
       reliability: number;
     }>;
   };
+  omegaCrucible?: OmegaCrucibleEvaluation;
+  specialistAgentContracts?: SpecialistAgentContract[];
+  constraintHierarchy?: ConstraintHierarchy;
+  observabilityTelemetry?: OrchestratorObservabilityTelemetry;
 }
 
 export type AutonomousTaskStatus =
@@ -1889,10 +1982,18 @@ export interface PurchaseRecord {
   items?: PurchaseOrderItem[];
   isSandboxOrder?: boolean;
   orderTypeLabel?: 'SANDBOX ORDER';
-  paymentStatus?: 'COMPLETED' | 'APPROVED' | 'PENDING' | 'FAILED' | 'CANCELLED' | 'REFUNDED';
+  paymentStatus?:
+    | 'COMPLETED'
+    | 'APPROVED'
+    | 'PENDING'
+    | 'DECLINED'
+    | 'FAILED'
+    | 'CANCELLED'
+    | 'REFUNDED';
   merchantOrderStatus?: string;
-  status: 'completed' | 'pending' | 'failed' | 'cancelled' | 'refunded';
+  status: 'completed' | 'pending' | 'declined' | 'failed' | 'cancelled' | 'refunded';
   createdAt: string;
+  completedAt?: string | null;
   updatedAt?: string;
   payerEmail: string;
   webhookVerified?: boolean;
@@ -1950,6 +2051,7 @@ export interface ConversationThread {
   createdAt: string;
   updatedAt: string;
   turns: ConversationTurn[];
+  archived?: boolean;
 }
 
 // ============================================================================
@@ -2844,5 +2946,247 @@ export interface OpalSevenAgentSystemReport {
   omegaRegressionTests?: OpalAcceptanceTestResult[];
 }
 
+export interface SavedComparisonRecord {
+  id: string;
+  userId: string;
+  title: string;
+  category: string;
+  productIds: string[];
+  products: RankedProductOffer[];
+  recommendedProductId: string | null;
+  crucibleSummary: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
+export interface SavedProductRevalidationItem {
+  productId: string;
+  productName: string;
+  merchant: string;
+  previousPrice: number | null;
+  currentPrice: number | null;
+  priceChanged: boolean;
+  priceDelta: number | null;
+  availabilityStatus: RankedProductOffer['availabilityStatus'];
+  lastValidatedAt: string;
+  statusMessage: string;
+}
+
+// ============================================================================
+// PHASE 5: SEVEN-AGENT ORCHESTRATION, OMEGA DECISION CRUCIBLE, VOICE MODE & OBSERVABILITY
+// ============================================================================
+
+export type SpecialistAgentId =
+  | 'agent_1_intent_requirements'
+  | 'agent_2_global_discovery'
+  | 'agent_3_identity_catalog'
+  | 'agent_4_technical_research'
+  | 'agent_5_quality_reputation'
+  | 'agent_6_pricing_value'
+  | 'agent_7_independent_verification';
+
+export type EvidenceClassificationTier =
+  | 'VERIFIED_FACT'
+  | 'SOURCE_CLAIM'
+  | 'INFERENCE'
+  | 'UNKNOWN'
+  | 'CONFLICTING_EVIDENCE';
+
+export type MandatoryRequirementStatus = 'satisfied' | 'failed' | 'unknown';
+
+export type OmegaVerdictType =
+  | 'STRONG_RECOMMENDATION'
+  | 'RECOMMENDATION_WITH_CAVEATS'
+  | 'INSUFFICIENT_EVIDENCE'
+  | 'REQUIREMENTS_NOT_SATISFIED'
+  | 'CONFLICTING_EVIDENCE'
+  | 'NO_RELIABLE_MATCH';
+
+export interface StructuredEvidenceItem {
+  claim: string;
+  classification: EvidenceClassificationTier;
+  source: string;
+  productIdentity: string | null;
+  confidence: number;
+  timestamp: string;
+}
+
+export interface SpecialistAgentContract {
+  agentIdentity: SpecialistAgentId;
+  agentName: string;
+  taskId: string;
+  findings: Record<string, unknown>;
+  supportingEvidence: StructuredEvidenceItem[];
+  sourceReferences: string[];
+  confidence: number;
+  unknownFields: string[];
+  contradictions: string[];
+  completionStatus: 'completed' | 'degraded' | 'failed' | 'skipped';
+  recommendedNextAction:
+    | 'proceed'
+    | 'clarify'
+    | 'expand_search'
+    | 'downgrade_confidence'
+    | 'halt';
+  durationMs: number;
+}
+
+export interface ConstraintContradiction {
+  field: string;
+  previousValue: string;
+  newValue: string;
+  resolutionQuestion: string;
+}
+
+export interface ConstraintHierarchy {
+  hardConstraints: {
+    maxBudget: number | null;
+    minBudget: number | null;
+    currency: 'USD' | 'EUR' | 'GBP';
+    category: string;
+    mandatorySpecs: string[];
+    condition: string | null;
+    requiredAvailability: boolean;
+    requiredMerchant: string | null;
+    quantity: number;
+  };
+  softPreferences: {
+    preferredBrands: string[];
+    styleOrColor: string[];
+    optionalFeatures: string[];
+    prioritizePrice: boolean;
+    prioritizePerformance: boolean;
+  };
+  conditionalPreferences: Array<{
+    condition: string;
+    preference: string;
+  }>;
+  exclusions: {
+    excludedBrands: string[];
+    excludedMerchants: string[];
+    excludedConditions: string[];
+    excludedKeywords: string[];
+  };
+  unknownRequirements: string[];
+  detectedContradictions: ConstraintContradiction[];
+  intentConfidence: number;
+  multiTurnPreservedContext: string[];
+}
+
+export interface MandatoryRequirementCheck {
+  productId: string;
+  productName: string;
+  requirement: string;
+  status: MandatoryRequirementStatus;
+  evidenceBasis: string;
+}
+
+export interface OmegaNineDimensionScore {
+  requirementFit: number;
+  technicalCapability: number;
+  buildQualityMaterials: number;
+  reliabilityLongevity: number;
+  priceValueRatio: number;
+  merchantTrustworthiness: number;
+  availabilityDeliveryConfidence: number;
+  evidenceCompleteness: number;
+  riskProfile: number;
+  explainableBasis: Record<string, string>;
+}
+
+export interface OmegaCrucibleEvaluation {
+  verdict: OmegaVerdictType;
+  verdictLabel: string;
+  decisionConfidence: number;
+  confidenceBreakdown: {
+    evidenceCoverageScore: number;
+    sourceQualityScore: number;
+    agentAgreementScore: number;
+    mandatorySatisfactionScore: number;
+    contradictionPenalty: number;
+    priceFreshnessScore: number;
+  };
+  mandatoryRequirementChecks: MandatoryRequirementCheck[];
+  paretoFrontierProductIds: string[];
+  dominatedProductExplanations: Record<string, string>;
+  nineDimensionScores: Record<string, OmegaNineDimensionScore>;
+  evidenceItems: StructuredEvidenceItem[];
+  unresolvedUncertainties: string[];
+  rejectedCandidateReasons: Array<{
+    productId: string;
+    productName: string;
+    reason: string;
+  }>;
+  antiHallucinationAudit: {
+    passed: boolean;
+    checkedClaimsCount: number;
+    strippedUnsupportedClaims: string[];
+    verifiedPricesCount: number;
+    verifiedUrlsCount: number;
+  };
+}
+
+export type OrchestrationTaskType =
+  | 'product_discovery'
+  | 'product_comparison'
+  | 'deep_technical_research'
+  | 'cart_operation'
+  | 'purchase_preparation'
+  | 'clarification_request'
+  | 'contradiction_resolution'
+  | 'general_conversation';
+
+export interface OrchestratorObservabilityTelemetry {
+  orchestrationId: string;
+  taskType: OrchestrationTaskType;
+  totalDurationMs: number;
+  agentContracts: SpecialistAgentContract[];
+  parallelStagesExecuted: string[][];
+  channel3RequestsMade: number;
+  channel3CacheHits: number;
+  deduplicatedRequestsSaved: number;
+  adaptiveExpansionTriggered: boolean;
+  omegaVerdict: OmegaVerdictType | null;
+  decisionConfidence: number;
+  hallucinationAuditPassed: boolean;
+}
+
+export interface VoiceInteractionPayload {
+  rawTranscript: string;
+  normalizedTranscript: string;
+  detectedLanguage: 'en-US' | 'ar-SA' | 'fr-FR' | 'es-ES' | 'de-DE' | 'ja-JP';
+  extractedEntities: {
+    productNames: string[];
+    numbers: number[];
+    prices: Array<{ amount: number; currency: 'USD' | 'EUR' | 'GBP' }>;
+    isPurchaseOrCartCommand: boolean;
+    requiresVoicePurchaseConfirmation: boolean;
+    voiceConfirmationPrompt?: string;
+  };
+  spokenSummaryText: string;
+}
+
+export interface Phase5ScenarioEvaluationResult {
+  scenarioId:
+    | 'Scenario A'
+    | 'Scenario B'
+    | 'Scenario C'
+    | 'Scenario D'
+    | 'Scenario E'
+    | 'Scenario F'
+    | 'Scenario G'
+    | 'Scenario H'
+    | 'Scenario I'
+    | 'Scenario J'
+    | 'Scenario K'
+    | 'Scenario L';
+  title: string;
+  status: 'PASS' | 'PARTIAL' | 'FAIL' | 'BLOCKED';
+  expectedOutcome: string;
+  actualOutcome: string;
+  omegaVerdict?: OmegaVerdictType | null;
+  decisionConfidence?: number;
+  durationMs: number;
+  assertionsVerified: number;
+}
 

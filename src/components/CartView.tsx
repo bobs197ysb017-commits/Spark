@@ -26,6 +26,7 @@ import type {
   CartValidationReport,
   CouponItem,
   PayPalSandboxCatalogItem,
+  RankedProductOffer,
   UserCartSummary,
 } from '../types/spark';
 import { ProductArtwork } from './ProductArtwork';
@@ -183,19 +184,27 @@ export const CartView: React.FC<CartViewProps> = ({
     id: item.productId,
     offerId: item.offerId,
     sourceId: item.sourceId,
+    sourceName:
+      item.sourceId === 'paypal_sandbox_test_catalog'
+        ? 'PayPal Sandbox Catalog'
+        : 'Channel3 Product Graph API',
     sourceLabel:
       item.sourceId === 'paypal_sandbox_test_catalog'
         ? 'PayPal Sandbox Catalog'
         : 'Channel3 Product Graph API',
+    verificationStatus: 'verified_live_source',
     name: item.productName,
     brand: item.specs?.Brand || item.merchant,
     merchant: item.merchant,
+    category: item.category || 'Cart Item',
+    summary: item.productName,
     price: item.unitPrice,
     priceStatus: item.priceStatus || 'verified',
     currency: item.currency,
     shippingCost: item.shippingCost,
     shippingStatus: item.shippingStatus,
     estimatedTaxRate: item.estimatedTaxRate,
+    taxStatus: item.taxStatus === 'verified' ? 'verified' : 'unknown',
     availability: item.availability,
     availabilityStatus:
       item.availability === 'in_stock'
@@ -209,6 +218,12 @@ export const CartView: React.FC<CartViewProps> = ({
     imageUrl: item.imageUrl,
     specs: item.specs || {},
     retrievedAt: item.updatedAt,
+    couponStatus: 'no_verified_coupon',
+    checkoutStatus: 'supported_paypal',
+    bestCoupon: null,
+    couponDiscountAmount: 0,
+    netItemPrice: item.unitPrice,
+    withinBudget: true,
     completenessScore: 95,
     rank: 1,
     pros: [],
@@ -598,7 +613,7 @@ export const CartView: React.FC<CartViewProps> = ({
                         <ProductArtwork
                           imageUrl={item.imageUrl || null}
                           sourceName={item.merchant}
-                          name={item.productName || item.name || 'Cart Item'}
+                          name={item.productName || 'Cart Item'}
                           className="w-full h-full rounded-xl border border-white/[0.08]"
                         />
                       </div>

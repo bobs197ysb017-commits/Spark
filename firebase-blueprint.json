@@ -311,15 +311,36 @@
         "totalAmount": {
           "type": "number"
         },
+        "unitPrice": {
+          "type": "number"
+        },
+        "paypalOrderId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "paypalCaptureId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
         "currency": {
           "type": "string",
           "enum": ["USD", "EUR", "GBP"]
         },
         "status": {
           "type": "string",
-          "enum": ["pending", "completed", "failed", "cancelled", "refunded"]
+          "enum": ["pending", "completed", "declined", "failed", "cancelled", "refunded"]
+        },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["COMPLETED", "PENDING", "DECLINED", "FAILED", "CANCELLED", "REFUNDED"]
         },
         "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
           "type": "string",
           "format": "date-time"
         },
@@ -664,6 +685,60 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "SavedComparisonDoc": {
+      "title": "SavedComparisonDoc",
+      "description": "User-owned side-by-side comparison workspace snapshot (/users/{userId}/comparisons/{comparisonId})",
+      "type": "object",
+      "properties": {
+        "comparisonId": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "productCount": { "type": "integer" },
+        "productsJson": { "type": "string" },
+        "recommendedProductId": { "type": "string" },
+        "crucibleSummary": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "comparisonId",
+        "userId",
+        "title",
+        "category",
+        "productCount",
+        "productsJson",
+        "recommendedProductId",
+        "crucibleSummary",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserSubscriptionDoc": {
+      "title": "UserSubscriptionDoc",
+      "description": "User-owned subscription plan state (/users/{userId}/subscriptions/current)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "planId": { "type": "string" },
+        "status": { "type": "string" },
+        "billingCycle": { "type": "string" },
+        "monthlyPriceUsd": { "type": "number" },
+        "paypalSubscriptionId": { "type": "string" },
+        "cancelAtPeriodEnd": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "planId",
+        "status",
+        "billingCycle",
+        "monthlyPriceUsd",
+        "cancelAtPeriodEnd",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -686,6 +761,14 @@
     "/users/{userId}/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/ConversationDoc" },
       "description": "Recent shopping conversations belonging to the user"
+    },
+    "/users/{userId}/comparisons/{comparisonId}": {
+      "schema": { "$ref": "#/entities/SavedComparisonDoc" },
+      "description": "User-owned saved product comparison workspaces"
+    },
+    "/users/{userId}/subscriptions/{subDocId}": {
+      "schema": { "$ref": "#/entities/UserSubscriptionDoc" },
+      "description": "User-owned subscription plan state"
     },
     "/users/{userId}/purchases/{purchaseId}": {
       "schema": { "$ref": "#/entities/PurchaseDoc" },

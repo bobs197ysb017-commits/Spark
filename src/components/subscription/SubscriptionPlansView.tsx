@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type {
   SandboxBuyerWalletState,
+  SubscriptionPaymentRecord,
   SubscriptionPlanId,
   SubscriptionQuotaStatus,
   SubscriptionTierConfig,
@@ -21,6 +22,7 @@ import type {
   UserProfile,
 } from '../../types/spark';
 import { buildAuthenticatedHeaders } from '../../utils/authClient';
+import { syncUserSubscriptionToFirestore } from '../../firebase';
 
 interface SubscriptionPlansViewProps {
   user: UserProfile;
@@ -49,26 +51,51 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
   const [checkoutSuccess, setCheckoutSuccess] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [buyerWallet, setBuyerWallet] = useState<SandboxBuyerWalletState | null>(null);
+  const [subscriptionPayments, setSubscriptionPayments] = useState<SubscriptionPaymentRecord[]>([]);
   const [cancelStatusMessage, setCancelStatusMessage] = useState<string | null>(null);
 
   const activePlanId: SubscriptionPlanId = quotaStatus?.plan?.id || 'free';
 
   const fetchBuyerWallet = useCallback(async () => {
     try {
-      const res = await fetch(
-        `/api/subscriptions/me?userId=${encodeURIComponent(user.id)}`,
-        {
+      const [meRes, analyticsRes] = await Promise.all([
+        fetch(`/api/subscriptions/me?userId=${encodeURIComponent(user.id)}`, {
           headers: buildAuthenticatedHeaders({
             method: 'GET',
             extraHeaders: { 'x-spark-user-id': user.id },
           }),
           credentials: 'include',
+        }),
+        fetch(`/api/subscriptions/analytics?userId=${encodeURIComponent(user.id)}`, {
+          headers: buildAuthenticatedHeaders({
+            method: 'GET',
+            extraHeaders: { 'x-spark-user-id': user.id },
+          }),
+          credentials: 'include',
+        }),
+      ]);
+      if (meRes.ok) {
+        const data = await meRes.json();
+        if (data.buyerWallet) {
+          setBuyerWallet(data.buyerWallet);
         }
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.buyerWallet) {
-        setBuyerWallet(data.buyerWallet);
+        if (data.quotaStatus?.subscription) {
+          const sub = data.quotaStatus.subscription;
+          void syncUserSubscriptionToFirestore(user.id, {
+            planId: sub.planId || 'free',
+            status: sub.status || 'active',
+            billingCycle: 'monthly',
+            monthlyPriceUsd: data.quotaStatus.plan?.priceMonthly || 0,
+            paypalSubscriptionId: sub.paypalSubscriptionId || null,
+            cancelAtPeriodEnd: Boolean(sub.cancelAtPeriodEnd),
+          });
+        }
+      }
+      if (analyticsRes.ok) {
+        const aData = await analyticsRes.json();
+        if (Array.isArray(aData.payments)) {
+          setSubscriptionPayments(aData.payments);
+        }
       }
     } catch {
       // Ignore network fetch errors
@@ -629,6 +656,135 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
             </div>
           );
         })}
+      </div>
+
+      {/* Plan Comparison Matrix Table */}
+      <div
+        data-testid="subscription-plan-comparison-matrix"
+        className="rounded-3xl bg-[#121217]/95 border border-white/[0.08] overflow-hidden"
+      >
+        <div className="px-5 py-4 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Crown className="w-4 h-4 text-violet-400" />
+            <h2 className="text-sm font-bold text-white">
+              Plan Entitlements &amp; Quota Comparison Matrix
+            </h2>
+          </div>
+          <span className="text-[11px] font-mono text-zinc-400">
+            Server-Authoritative Enforcement · Synced to Firestore (/users/uid/subscriptions/current)
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-white/[0.08] bg-zinc-900/60">
+                <th className="p-3.5 text-zinc-400 font-medium">Entitlement / Quota</th>
+                {plans.map((p) => (
+                  <th key={p.id} className="p-3.5 font-semibold text-white">
+                    {p.name} (${p.priceMonthly}/mo)
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/[0.06] font-mono">
+              <tr>
+                <td className="p-3.5 text-zinc-300 font-sans">AI Reasoning Tier</td>
+                {plans.map((p) => (
+                  <td key={p.id} className="p-3.5 text-violet-300 uppercase">
+                    {p.modelTier}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3.5 text-zinc-300 font-sans">Monthly Product Searches</td>
+                {plans.map((p) => (
+                  <td key={p.id} className="p-3.5 text-zinc-100">
+                    {p.monthlySearches.toLocaleString()} / mo
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3.5 text-zinc-300 font-sans">Deep Product Analyses</td>
+                {plans.map((p) => (
+                  <td key={p.id} className="p-3.5 text-zinc-100">
+                    {p.monthlyAnalyses.toLocaleString()} / mo
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3.5 text-zinc-300 font-sans">Feedico Coupon Lookups</td>
+                {plans.map((p) => (
+                  <td key={p.id} className="p-3.5 text-zinc-100">
+                    {p.monthlyCoupons.toLocaleString()} / mo
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3.5 text-zinc-300 font-sans">Multi-Source Workflows</td>
+                {plans.map((p) => (
+                  <td key={p.id} className="p-3.5 text-emerald-300">
+                    {p.monthlyWorkflows.toLocaleString()} / mo
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3.5 text-zinc-300 font-sans">Concurrent Executions</td>
+                {plans.map((p) => (
+                  <td key={p.id} className="p-3.5 text-cyan-300">
+                    {p.maxConcurrency} simultaneous
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Subscription Billing & Audit Log History */}
+      <div
+        data-testid="subscription-billing-history"
+        className="rounded-3xl bg-[#121217]/95 border border-white/[0.08] p-5 space-y-3"
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-white flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>Subscription Billing &amp; Event Audit Trail ({subscriptionPayments.length})</span>
+          </h2>
+          <span className="text-[11px] font-mono text-zinc-400">
+            PayPal Sandbox Verified Billing Records
+          </span>
+        </div>
+        {subscriptionPayments.length === 0 ? (
+          <p className="text-xs text-zinc-400">
+            No paid subscription billing events recorded yet. Upgrading to Luna, Terra, or Sol records an immutable PayPal Sandbox billing audit entry here.
+          </p>
+        ) : (
+          <div className="divide-y divide-white/[0.06] text-xs font-mono">
+            {subscriptionPayments.slice(0, 8).map((pay) => (
+              <div
+                key={pay.id}
+                className="py-2.5 flex flex-wrap items-center justify-between gap-2"
+              >
+                <div>
+                  <span className="text-white font-semibold uppercase">{pay.planId} Plan</span>
+                  <span className="text-zinc-500 mx-2">·</span>
+                  <span className="text-violet-300">{pay.paypalTransactionId}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-emerald-300 font-bold">
+                    ${pay.amount.toFixed(2)} {pay.currency}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[10px] uppercase">
+                    {pay.status}
+                  </span>
+                  <span className="text-zinc-500">
+                    {new Date(pay.createdAt).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* PayPal Subscription Checkout Modal */}

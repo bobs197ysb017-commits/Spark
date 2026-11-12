@@ -24,12 +24,15 @@ import {
 import {
   PayPalSandboxEngine,
   SparkAuthSessionManager,
+  VERCEL_PREVIEW_DOMAIN,
   canTransitionLifecycleState,
   canTransitionTransactionState,
   classifyFirebaseAuthError,
   createSingleFlightAuthGuard,
+  isAuthorizedSparkDomain,
   synchronizeFirebaseUserAccount,
   validateFirebaseAuthEnvironmentConfig,
+  validatePayPalRedirectUri,
   verifyFirebaseJwtClaims,
   type FetchLike,
   type PayPalEnvVariables,
@@ -1102,5 +1105,16 @@ test('Google Auth [Scenarios 9, 11, 12 & 14] — Token validation, duplicate req
     ),
     true
   );
+  assert.equal(
+    envAudit.requiredAuthorizedDomains.includes(VERCEL_PREVIEW_DOMAIN),
+    true,
+    'spark-ten-theta.vercel.app must be registered in Firebase Auth requiredAuthorizedDomains'
+  );
+  assert.equal(isAuthorizedSparkDomain('spark-ten-theta.vercel.app'), true);
+  const vercelCallbackAudit = validatePayPalRedirectUri(
+    'https://spark-ten-theta.vercel.app/api/paypal/callback'
+  );
+  assert.equal(vercelCallbackAudit.valid, true);
 });
+
 

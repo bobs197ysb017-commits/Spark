@@ -132,7 +132,13 @@ service cloud.firestore {
           'price',
           'priceStatus',
           'imageUrl',
-          'createdAt'
+          'collectionName',
+          'availabilityStatus',
+          'previousPrice',
+          'priceChanged',
+          'lastValidatedAt',
+          'createdAt',
+          'updatedAt'
         ]) &&
         data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
         data.userId == request.auth.uid &&
@@ -148,7 +154,13 @@ service cloud.firestore {
         data.priceStatus is string && data.priceStatus.size() <= 40 &&
         (data.priceStatus == 'verified' || data.priceStatus == 'price_could_not_be_verified') &&
         data.imageUrl is string && data.imageUrl.size() <= 500 &&
-        data.createdAt is timestamp;
+        (!('collectionName' in data) || (data.collectionName is string && data.collectionName.size() <= 80)) &&
+        (!('availabilityStatus' in data) || (data.availabilityStatus is string && data.availabilityStatus.size() <= 40)) &&
+        (!('previousPrice' in data) || data.previousPrice is number || data.previousPrice is int) &&
+        (!('priceChanged' in data) || data.priceChanged is bool) &&
+        (!('lastValidatedAt' in data) || (data.lastValidatedAt is string && data.lastValidatedAt.size() <= 64)) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     // Validation Blueprint: ConversationDoc (/users/{userId}/conversations/{conversationId})
@@ -168,6 +180,7 @@ service cloud.firestore {
           'title',
           'lastPrompt',
           'turnCount',
+          'archived',
           'createdAt',
           'updatedAt'
         ]) &&
@@ -177,6 +190,7 @@ service cloud.firestore {
         data.title is string && data.title.size() >= 1 && data.title.size() <= 140 &&
         data.lastPrompt is string && data.lastPrompt.size() >= 1 && data.lastPrompt.size() <= 300 &&
         data.turnCount is int && data.turnCount >= 1 && data.turnCount <= 200 &&
+        (!('archived' in data) || data.archived is bool) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -201,33 +215,43 @@ service cloud.firestore {
         data.keys().hasOnly([
           'userId',
           'orderReference',
+          'paypalOrderId',
+          'paypalCaptureId',
           'paypalTransactionId',
           'sourceId',
           'productId',
           'productName',
           'merchant',
           'quantity',
+          'unitPrice',
           'totalAmount',
           'currency',
           'status',
+          'paymentStatus',
           'createdAt',
+          'completedAt',
           'updatedAt'
         ]) &&
         data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
         data.userId == request.auth.uid &&
         data.orderReference is string && data.orderReference.size() >= 3 && data.orderReference.size() <= 64 &&
         data.paypalTransactionId is string && data.paypalTransactionId.size() >= 3 && data.paypalTransactionId.size() <= 128 &&
+        (!('paypalOrderId' in data) || (data.paypalOrderId is string && data.paypalOrderId.size() >= 1 && data.paypalOrderId.size() <= 128)) &&
+        (!('paypalCaptureId' in data) || (data.paypalCaptureId is string && data.paypalCaptureId.size() >= 1 && data.paypalCaptureId.size() <= 128)) &&
         data.sourceId is string && data.sourceId.size() >= 2 && data.sourceId.size() <= 64 &&
         data.productId is string && data.productId.size() >= 1 && data.productId.size() <= 128 &&
         data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 200 &&
         data.merchant is string && data.merchant.size() >= 1 && data.merchant.size() <= 120 &&
         data.quantity is int && data.quantity >= 1 && data.quantity <= 20 &&
+        (!('unitPrice' in data) || ((data.unitPrice is number || data.unitPrice is int) && data.unitPrice >= 0)) &&
         (data.totalAmount is number || data.totalAmount is int) && data.totalAmount >= 0 &&
         data.currency is string && data.currency.size() == 3 &&
         (data.currency == 'USD' || data.currency == 'EUR' || data.currency == 'GBP') &&
         data.status is string && data.status.size() <= 20 &&
-        (data.status == 'pending' || data.status == 'completed' || data.status == 'failed' || data.status == 'cancelled' || data.status == 'refunded') &&
+        (data.status == 'pending' || data.status == 'completed' || data.status == 'declined' || data.status == 'failed' || data.status == 'cancelled' || data.status == 'refunded') &&
+        (!('paymentStatus' in data) || (data.paymentStatus is string && (data.paymentStatus == 'COMPLETED' || data.paymentStatus == 'PENDING' || data.paymentStatus == 'DECLINED' || data.paymentStatus == 'FAILED' || data.paymentStatus == 'CANCELLED' || data.paymentStatus == 'REFUNDED'))) &&
         data.createdAt is timestamp &&
+        (!('completedAt' in data) || data.completedAt is timestamp) &&
         data.updatedAt is timestamp;
     }
 
@@ -316,6 +340,79 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    // Validation Blueprint: SavedComparisonDoc (/users/{userId}/comparisons/{comparisonId})
+    function isValidSavedComparison(data) {
+      return data.keys().hasAll([
+          'comparisonId',
+          'userId',
+          'title',
+          'category',
+          'productCount',
+          'productsJson',
+          'recommendedProductId',
+          'crucibleSummary',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'comparisonId',
+          'userId',
+          'title',
+          'category',
+          'productCount',
+          'productsJson',
+          'recommendedProductId',
+          'crucibleSummary',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.comparisonId is string && data.comparisonId.size() >= 1 && data.comparisonId.size() <= 128 &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+        data.productCount is int && data.productCount >= 1 && data.productCount <= 20 &&
+        data.productsJson is string && data.productsJson.size() >= 2 && data.productsJson.size() <= 65536 &&
+        data.recommendedProductId is string && data.recommendedProductId.size() <= 128 &&
+        data.crucibleSummary is string && data.crucibleSummary.size() <= 2000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: UserSubscriptionDoc (/users/{userId}/subscriptions/{subDocId})
+    function isValidUserSubscription(data) {
+      return data.keys().hasAll([
+          'userId',
+          'planId',
+          'status',
+          'billingCycle',
+          'monthlyPriceUsd',
+          'cancelAtPeriodEnd',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'planId',
+          'status',
+          'billingCycle',
+          'monthlyPriceUsd',
+          'paypalSubscriptionId',
+          'cancelAtPeriodEnd',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.planId is string && (data.planId == 'free' || data.planId == 'luna' || data.planId == 'terra' || data.planId == 'sol') &&
+        data.status is string && data.status.size() <= 32 &&
+        data.billingCycle is string && data.billingCycle.size() <= 32 &&
+        (data.monthlyPriceUsd is number || data.monthlyPriceUsd is int) && data.monthlyPriceUsd >= 0 &&
+        (!('paypalSubscriptionId' in data) || (data.paypalSubscriptionId is string && data.paypalSubscriptionId.size() <= 128)) &&
+        data.cancelAtPeriodEnd is bool &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        data.updatedAt is timestamp;
+    }
+
     // 1. User Preferences Profile
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId) && (resource == null || existing().userId == request.auth.uid);
@@ -367,7 +464,9 @@ service cloud.firestore {
           isValidSearchAudit(incoming()) &&
           incoming().createdAt == request.time &&
           parentUserExists(userId);
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(searchId) &&
+          existing().userId == request.auth.uid;
       }
 
       // 4. Saved Products Subcollection
@@ -379,7 +478,12 @@ service cloud.firestore {
           incoming().productId == productId &&
           incoming().createdAt == request.time &&
           parentUserExists(userId);
-        allow update: if false;
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(productId) &&
+          isValidSavedProduct(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().productId == existing().productId &&
+          incoming().createdAt == existing().createdAt &&
+          parentUserExists(userId);
         allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(productId) &&
           existing().userId == request.auth.uid &&
           parentUserExists(userId);
@@ -401,11 +505,49 @@ service cloud.firestore {
           incoming().conversationId == existing().conversationId &&
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'lastPrompt', 'turnCount', 'updatedAt']) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'lastPrompt', 'turnCount', 'archived', 'updatedAt']) &&
           parentUserExists(userId);
         allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(conversationId) &&
           existing().userId == request.auth.uid &&
           parentUserExists(userId);
+      }
+
+      // 5b. Saved Comparisons Subcollection (/users/{userId}/comparisons/{comparisonId})
+      match /comparisons/{comparisonId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(comparisonId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(comparisonId) &&
+          isValidSavedComparison(incoming()) &&
+          incoming().comparisonId == comparisonId &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(comparisonId) &&
+          isValidSavedComparison(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().comparisonId == existing().comparisonId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(comparisonId) &&
+          existing().userId == request.auth.uid &&
+          parentUserExists(userId);
+      }
+
+      // 5c. User Subscription State Subcollection (/users/{userId}/subscriptions/{subDocId})
+      match /subscriptions/{subDocId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(subDocId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(subDocId) &&
+          isValidUserSubscription(incoming()) &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(subDocId) &&
+          isValidUserSubscription(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow delete: if false;
       }
 
       // 6. Verified Purchases Subcollection (with Terminal State Locking)
@@ -426,7 +568,7 @@ service cloud.firestore {
           incoming().productId == existing().productId &&
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paypalTransactionId', 'updatedAt']) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'paypalTransactionId', 'paypalOrderId', 'paypalCaptureId', 'completedAt', 'updatedAt']) &&
           parentUserExists(userId);
         allow delete: if false;
       }

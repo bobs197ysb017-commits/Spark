@@ -1,0 +1,694 @@
+# SPARK — FINAL FULL-SYSTEM REPAIR, PRODUCT UPGRADE & COMMERCIAL READINESS MISSION
+
+**Mission:** Transform Spark — Global Product Intelligence into a stable, secure, polished, commercially functional, competition-ready product capable of competing for the highest positions in a serious AI product competition.
+
+This is an execution mission, not a planning exercise. You are responsible for inspecting the existing application, identifying real defects, fixing them in the codebase, verifying every critical workflow, and delivering a final evidence-based assessment.
+
+**Do not stop after producing an audit. Do not merely describe problems. Implement the fixes, run the tests, inspect the results, and repair any remaining failures.**
+
+## 1. Operating Rules and Project Preservation
+
+1. Inspect the complete existing codebase, application architecture, backend services, database schema, API integrations, environment configuration, and deployment before modifying anything.
+2. Work on the existing Spark project. Preserve its identity, working functionality, architecture, existing user data, and integrations.
+3. Never replace a working implementation with a mock, static response, demonstration screen, or hardcoded simulation.
+4. Do not rebuild the application unnecessarily. Fix the actual root causes and make targeted improvements.
+5. Do not introduce breaking changes, delete important data, or change database schemas without a safe migration strategy.
+6. Back up important configurations and preserve a recoverable version before high-impact changes.
+7. Never expose API keys, tokens, credentials, private user data, or payment secrets in frontend code, logs, or public responses.
+8. Do not claim that a feature works unless you have actually tested it.
+9. Use the existing project's framework, libraries, and coding conventions whenever reasonable.
+10. Keep all payment operations in **PayPal Sandbox**. Never initiate real-money transactions.
+
+### Mandatory integration constraints
+
+- **Channel3:** Preserve and verify the existing product data integration. Use Channel3 as the product catalog and product-discovery data source. Do not create duplicate integrations or replace it with an unrelated provider.
+- **PayPal:** Maintain and repair the actual PayPal Sandbox payment integration.
+- **Firebase:** Maintain and verify Firebase Authentication, Firestore, and user-specific data access.
+- **APIMatic PayPal Context Plugin:** Treat it as a development-time assistance tool, not a runtime payment provider.
+- **AG Grid / AG Studio:** Preserve existing analytics integration if implemented and functional.
+- **Do not introduce Elasticsearch or Elastic.**
+- Preserve the existing AI provider configuration and working AI capabilities. Do not silently switch models or introduce fake AI responses.
+
+## 2. Critical Priority — Repair Subscription Payments and Plan Activation
+
+This is a critical commercial defect. Investigate why selecting or purchasing an application plan does not correctly deduct the payment amount or activate the purchased plan.
+
+Trace the complete subscription flow from the pricing page to the payment provider, backend verification, database update, and user interface.
+
+### Required payment behavior
+
+1. Display the actual available plans, their configured prices, currencies, billing periods, features, and quotas.
+2. Ensure that the displayed price matches the price stored in the authoritative backend configuration.
+3. When a user selects a paid plan, create a real PayPal Sandbox order through the secure backend.
+4. Pass the correct plan identifier, amount, and currency.
+5. Require explicit user approval before capturing payment.
+6. Complete the payment through the backend, not through an unverified frontend success callback.
+7. Verify the actual PayPal capture result, including:
+   - Order identifier.
+   - Capture identifier.
+   - Payment status.
+   - Amount.
+   - Currency.
+   - Payee and transaction details.
+8. Activate the subscription only after a verified successful payment.
+9. Persist the subscription, payment record, selected plan, activation date, expiration or renewal information, and applicable limits in Firestore.
+10. Immediately refresh the user's actual subscription status throughout the application.
+11. Ensure that a cancelled, rejected, pending, failed, or unapproved payment never activates a paid plan.
+12. Handle retries, duplicate callbacks, repeated requests, and webhook events safely.
+13. Make payment capture and subscription activation idempotent to prevent duplicate charges or duplicate entitlement updates.
+14. Implement reliable payment reconciliation so that the application can recover from interrupted redirects or delayed callbacks.
+15. Provide clear payment success, pending, cancellation, and failure states.
+
+### Usage quotas and subscription enforcement
+
+Also inspect the application's quota-deduction system.
+
+- Verify that every paid feature checks the user's actual subscription and remaining allowance.
+- Deduct the correct quota only when the corresponding operation has successfully completed.
+- Never deduct usage twice because of retries or page refreshes.
+- Do not deduct quota merely because a user opened a plan page or started an operation that failed.
+- Use secure, transactional backend updates for quota deductions.
+- Prevent users from bypassing limits through frontend manipulation or direct API requests.
+- Correctly handle expired plans, plan upgrades, plan downgrades, renewals, and insufficient quotas according to the application's existing billing rules.
+
+**Important:** Distinguish actual PayPal subscription payments from in-app usage quotas. They are separate systems and must both work correctly.
+
+Test all available plan types using authorized Sandbox accounts. Do not invent prices, plans, or quotas; read the existing authoritative configuration.
+
+## 3. Remove Internal Technical Metadata from AI Responses
+
+The agent currently exposes an unnecessary technical block similar to:
+
+"Autonomous AI Product Intelligence  
+Category: Footwear & Athletic Gear  
+Model: gemini-3.1-flash-lite  
+Confidence: Evidence is robust for pricing and stock status..."
+
+Remove this entire internal metadata presentation from normal user-facing AI responses.
+
+Requirements:
+
+- Do not show internal agent names or pipeline labels.
+- Do not expose internal model identifiers.
+- Do not append raw category, confidence, orchestration, or implementation metadata to ordinary answers.
+- Do not expose internal prompts, internal agent instructions, or hidden technical execution details.
+- Keep useful technical information available in developer logs and internal diagnostics where appropriate.
+- Preserve genuine product evidence, verified facts, limitations, citations, and source links.
+- The final response should be natural, professional, relevant to the user's request, and easy to understand.
+
+Do not simply hide the block with CSS. Fix the actual response-generation and response-rendering pipeline so it does not leak internal metadata.
+
+### Agent response quality
+
+Review the full AI response pipeline:
+
+- Correct interpretation of user intent.
+- Multi-turn conversation context.
+- Accurate product identification.
+- Correct product specifications.
+- Reliable price and stock information.
+- Verifiable source references.
+- Meaningful comparisons.
+- Accurate strengths and weaknesses.
+- Transparent uncertainty when evidence is unavailable.
+- Consistent formatting across different product categories.
+
+Preserve Spark's existing specialist-agent architecture, product research workflow, decision logic, and evaluation capabilities.
+
+Do not fabricate product prices, availability, specifications, discounts, or citations. If Channel3 does not provide a specific piece of information, clearly distinguish unavailable information from verified information.
+
+Preserve the established detailed product evaluation and decision-report functionality.
+
+## 4. Settings — Build a Complete Functional Settings Center
+
+Expand the existing settings experience into a professional, organized settings center.
+
+Include the following sections where supported by the existing architecture:
+
+### Account and Profile
+- View and edit profile information.
+- Manage account details.
+- Secure password changes.
+- Account logout.
+- Account deletion with explicit confirmation and appropriate data handling.
+
+### Appearance
+- Light mode.
+- Dark mode.
+- System default.
+- Persistent theme preference.
+- Consistent appearance across every application page and component.
+
+### App Preferences
+- Preferred language.
+- Default product market or country, where applicable.
+- Relevant search and product-research preferences.
+- Default interface behavior.
+
+### Notifications
+- Functional notification preferences.
+- Product and saved-item notifications where supported.
+- Billing and subscription notifications.
+- Account and security notifications.
+
+### Privacy and Data
+- Manage saved conversations.
+- Access data-management controls.
+- Clear and understandable account-data handling.
+- Appropriate account-level privacy controls.
+
+### Subscription and Billing
+- Current plan.
+- Subscription status.
+- Available plan details.
+- Payment history.
+- Usage information.
+- Upgrade or downgrade options.
+- Billing-related actions.
+
+### Security
+- Password management.
+- Session handling.
+- Secure logout.
+- Account security information.
+- Any additional security controls already supported by the backend.
+
+**Every visible setting must actually work. Do not add decorative switches, fake buttons, or controls that do nothing.**
+
+## 5. Chat Management — Archive, Restore, and Delete
+
+Implement a complete conversation-management system.
+
+### Archive
+- Add an archive action to conversations.
+- Move archived conversations out of the normal conversation list without permanently deleting them.
+- Create an accessible Archived Conversations section.
+- Allow users to restore archived conversations.
+- Preserve messages, timestamps, conversation context, and ownership.
+
+### Delete
+- Add a delete action to conversations.
+- Display a clear confirmation before permanent deletion.
+- Delete the correct conversation and its associated messages from the user's data.
+- Update the interface immediately after successful deletion.
+- Handle backend errors without falsely claiming the conversation was deleted.
+
+### Data integrity
+- Ensure users can only archive, restore, or delete their own conversations.
+- Prevent accidental deletion of unrelated conversations.
+- Keep archived and deleted conversation states consistent across sessions and devices.
+- Verify that conversation history remains correctly associated with its owner.
+
+## 6. Improve and Fully Repair Light Mode
+
+The light theme must look like a carefully designed premium product, not a basic color inversion of dark mode.
+
+Inspect and improve:
+
+- Main dashboard.
+- Navigation sidebar.
+- Header.
+- Search and discovery interfaces.
+- AI chat.
+- Product cards.
+- Product comparisons.
+- Detailed decision reports.
+- Analytics dashboards.
+- Settings.
+- Subscription and billing pages.
+- Forms and inputs.
+- Dropdowns and menus.
+- Dialogs and confirmation windows.
+- Notifications and alerts.
+- Tables, graphs, and charts.
+- Hover, focus, selected, disabled, and loading states.
+
+Requirements:
+
+- Consistent background and surface colors.
+- Excellent text contrast and readability.
+- Appropriate borders, separators, and shadows.
+- Clear visual hierarchy.
+- Proper treatment of buttons, icons, cards, and interactive controls.
+- No white-on-white or dark-on-dark text.
+- No dark-theme components accidentally appearing in light mode.
+- No broken charts, menus, or overlays when changing themes.
+- Smooth and consistent theme switching.
+
+Test light mode and dark mode independently on desktop and mobile.
+
+## 7. Remove the Account-Side Balance Display
+
+Remove the visible balance indicator currently displayed near the user account in the application sidebar or account area.
+
+Requirements:
+
+- Remove the balance display from that location.
+- Keep the account menu clean and professional.
+- Do not delete the user's actual payment records, financial data, subscription information, or backend balance records.
+- Preserve any necessary billing functionality in the appropriate billing section.
+
+This is a user-interface change, not permission to remove financial data.
+
+## 8. Remove Voice Mode Completely
+
+Remove the application's voice-mode feature.
+
+Inspect and remove its user-facing components, including:
+
+- Voice-mode entry points.
+- Microphone controls.
+- Voice-mode buttons and icons.
+- Audio recording interfaces.
+- Voice-mode dialogs and screens.
+- Voice-mode-specific routes.
+- Unused voice-mode settings and navigation entries.
+- Voice-mode-only frontend components and obsolete code.
+
+Ensure that removing voice mode does not break normal text conversations, the chat interface, keyboard interaction, or any unrelated feature.
+
+Remove unused dependencies only when they are genuinely no longer required elsewhere.
+
+After removal, verify the application contains no broken buttons, empty spaces, or references to the removed feature.
+
+## 9. Add One Valuable Competitive Feature — Spark Price Watchlist
+
+Implement a genuine feature called **Spark Price Watchlist**.
+
+Its purpose is to help users make better purchasing decisions after completing product research.
+
+### Required functionality
+
+- Allow users to save products from discovery results and decision reports.
+- Display saved products in a dedicated Watchlist.
+- Store the last verified price, currency, availability, merchant, product identity, and verification timestamp.
+- Provide a functional manual refresh action using Channel3.
+- Compare the newest verified product information with the previous saved snapshot.
+- Highlight verified price increases, price decreases, unchanged prices, and stock-status changes.
+- Show the date and time of the latest verification.
+- Clearly indicate when information is unavailable or too old to rely on.
+- Allow users to remove saved products.
+- Persist each user's watchlist in Firestore.
+- Make the feature responsive and consistent with both application themes.
+
+### Data integrity
+
+Never invent historical prices or claim that a product price changed without comparing two actual verified snapshots.
+
+Do not pretend that background monitoring or real-time alerts exist unless they are genuinely implemented. A manual refresh is sufficient for the first reliable version.
+
+The feature should integrate naturally with Spark's existing discovery, comparison, and decision-report workflows.
+
+## 10. Complete Account and Authentication Repair
+
+Inspect Firebase Authentication and the complete account lifecycle.
+
+Test and fix:
+
+1. New user registration.
+2. Input validation.
+3. Email verification where configured.
+4. Login.
+5. Incorrect password handling.
+6. Logout.
+7. Session persistence.
+8. Page refresh while authenticated.
+9. Expired sessions.
+10. Password reset.
+11. Account-specific data loading.
+12. Protected routes.
+13. Access to restricted pages when logged out.
+14. Account deletion.
+15. Correct user identity and subscription restoration after login.
+
+Verify that the deployed application domain is authorized in Firebase Authentication.
+
+### Firestore security
+
+- Review all Firestore security rules.
+- Ensure each authenticated user can access only their own private data.
+- Protect subscription records, payment records, quotas, saved products, and conversations.
+- Prevent clients from directly granting themselves paid entitlements.
+- Perform sensitive payment and quota updates through trusted backend functions.
+- Apply least-privilege access.
+- Test unauthorized access attempts.
+
+Do not rely on frontend checks as a replacement for backend authorization.
+
+## 11. Complete Channel3 and Product Research Verification
+
+Verify the actual Channel3 integration from request to final AI response.
+
+Test:
+
+- Product discovery.
+- Search queries.
+- Product identity.
+- Product descriptions.
+- Product specifications.
+- Merchant information.
+- Prices.
+- Currency.
+- Stock status.
+- Product links.
+- Multiple product categories.
+- No-result responses.
+- Invalid or incomplete product data.
+- API failures.
+- Rate limits and timeouts.
+- Missing credentials or configuration.
+
+Investigate and resolve any remaining catalog-token, Feedico, data-mapping, or provider errors that affect the real integration.
+
+Do not return hardcoded sample products as if they were real results.
+
+The product research pipeline must clearly distinguish:
+
+- Verified information.
+- Missing information.
+- Conflicting information.
+- Outdated information.
+- Unavailable source information.
+
+Ensure that product research results are genuinely relevant to the requested category and that the AI does not repeatedly return generic or templated reports.
+
+## 12. Complete PayPal Sandbox End-to-End Testing
+
+Test the entire purchase journey using Sandbox accounts.
+
+The test must cover:
+
+1. A newly registered user with no paid subscription.
+2. Opening the plans page.
+3. Selecting a paid plan.
+4. Creating a PayPal Sandbox order.
+5. Redirecting to PayPal.
+6. Approving the payment.
+7. Returning to Spark.
+8. Capturing the payment.
+9. Verifying the captured transaction.
+10. Activating the correct subscription.
+11. Updating the user's Firestore records.
+12. Updating the application's plan interface.
+13. Updating the usage quotas.
+14. Displaying the correct payment record.
+15. Verifying the plan after logout and login.
+
+Also test:
+
+- User cancellation.
+- Unapproved orders.
+- Failed captures.
+- Duplicate submissions.
+- Repeated callbacks.
+- Interrupted payment redirects.
+- Invalid order IDs.
+- Incorrect amounts.
+- Incorrect currencies.
+- Delayed payment confirmation.
+- Duplicate webhook delivery.
+- Subscription expiration and renewal handling where implemented.
+
+A successful redirect is not proof of a successful payment. Only verified backend payment status can authorize subscription activation.
+
+## 13. Full Application UX and Interface Repair
+
+Inspect the entire application for:
+
+- Broken navigation.
+- Dead buttons.
+- Incorrect links.
+- Missing loading states.
+- Infinite loading.
+- Empty screens.
+- Broken images.
+- Misaligned layouts.
+- Incorrect responsive behavior.
+- Inconsistent typography.
+- Unreadable labels.
+- Form validation errors.
+- Incorrect empty states.
+- Poor error handling.
+- Inconsistent page transitions.
+- Unnecessary visual clutter.
+- Duplicated interface elements.
+- Unfinished or placeholder components.
+
+Improve the overall design to meet a premium software-product standard.
+
+Preserve Spark's established identity: dark luxury aesthetics, polished visual hierarchy, clean typography, refined glassmorphism where appropriate, smooth interactions, and a coherent light theme.
+
+Do not sacrifice usability or performance for visual effects.
+
+## 14. Performance, Reliability, and Security
+
+Perform a genuine technical review.
+
+### Performance
+- Optimize unnecessary component re-rendering.
+- Improve data fetching and caching where appropriate.
+- Avoid duplicate API requests.
+- Use pagination for large datasets.
+- Optimize large product lists and conversation histories.
+- Prevent memory leaks.
+- Review slow backend operations.
+- Improve loading and perceived responsiveness.
+- Keep AI research efficient without reducing factual accuracy.
+
+### Reliability
+- Add appropriate timeouts and retry behavior.
+- Handle API errors consistently.
+- Prevent duplicate operations.
+- Use clear application error states.
+- Protect important operations against partial failure.
+- Ensure database writes are consistent.
+- Avoid silent failures.
+
+### Security
+- Review API authorization.
+- Protect sensitive backend functions.
+- Validate untrusted input.
+- Protect user-specific Firestore records.
+- Check for exposed secrets.
+- Prevent unauthorized subscription or quota manipulation.
+- Review cross-user data access.
+- Avoid logging sensitive payment or authentication information.
+
+Do not claim that the application is secure merely because it uses Firebase or a payment provider. Verify the actual implementation.
+
+## 15. Automated and Manual Testing — No Critical Workflow Left Untested
+
+Create or improve automated tests for the application's critical functionality.
+
+Use the testing frameworks already available in the project where possible.
+
+Run the appropriate:
+
+- Build checks.
+- Type checks.
+- Lint checks.
+- Unit tests.
+- Integration tests.
+- Backend tests.
+- End-to-end tests.
+- Responsive UI checks.
+- Authentication tests.
+- Firestore authorization tests.
+- Payment-flow tests.
+- Subscription and quota tests.
+
+### Mandatory End-to-End Scenarios
+
+**Scenario A — New Account**
+- Open Spark.
+- Register a new account.
+- Verify authentication.
+- Load the application.
+- Confirm that the new account starts with the correct default plan and empty personal data.
+
+**Scenario B — Product Discovery**
+- Search for a real product.
+- Retrieve genuine Channel3 results.
+- Open a product.
+- Review its evidence.
+- Compare it with another product.
+- Generate a complete AI decision report.
+- Verify the response contains no internal metadata.
+
+**Scenario C — Conversation Management**
+- Start a conversation.
+- Send multiple messages.
+- Refresh the page.
+- Verify that the conversation persists.
+- Archive the conversation.
+- Restore it.
+- Delete another conversation.
+- Verify that the operations persist correctly.
+
+**Scenario D — Subscription Purchase**
+- Open the plans page.
+- Select a paid plan.
+- Complete the PayPal Sandbox approval and capture flow.
+- Verify the amount, currency, and transaction.
+- Confirm that the correct subscription is activated.
+- Verify that the payment appears in the user's payment history.
+
+**Scenario E — Quotas**
+- Check the user's starting quota.
+- Use a quota-limited feature successfully.
+- Verify the correct deduction.
+- Repeat the operation where necessary to test idempotency.
+- Verify failed requests do not incorrectly consume quota.
+- Confirm that unauthorized users cannot bypass the limits.
+
+**Scenario F — User Isolation**
+- Register two separate accounts.
+- Save conversations and products in both accounts.
+- Verify that neither account can access or modify the other's information.
+
+**Scenario G — Appearance and Settings**
+- Change themes.
+- Refresh the application.
+- Verify the selected theme persists.
+- Change supported settings.
+- Verify that their controls work.
+- Test mobile and desktop layouts.
+
+**Scenario H — Reliability**
+- Simulate API failure.
+- Simulate payment cancellation.
+- Test unavailable product data.
+- Test invalid requests.
+- Verify that the user receives an appropriate error and that no inconsistent records are created.
+
+## 16. Responsive and Cross-Browser Verification
+
+Inspect the application at common mobile, tablet, laptop, and desktop viewport sizes.
+
+Verify:
+
+- Navigation.
+- Sidebars.
+- Account menu.
+- Product cards.
+- Comparison layouts.
+- AI chat.
+- Decision reports.
+- Settings.
+- Subscription and checkout screens.
+- Tables and analytics.
+- Dialogs and notifications.
+
+Ensure there is no horizontal overflow, clipped content, inaccessible interaction, or unusable mobile layout.
+
+Test the deployed application in the target browser environment where access is available.
+
+## 17. Final Competition-Readiness Assessment
+
+After implementing all fixes, evaluate Spark objectively.
+
+Do not automatically declare the application competition-ready or claim it deserves first place.
+
+Use this scoring framework:
+
+| Evaluation Area | Weight |
+|---|---:|
+| AI intelligence and product decision quality | 20 |
+| Product data accuracy and Channel3 integration | 15 |
+| Payments, subscriptions, and commercial functionality | 20 |
+| Authentication, privacy, and security | 15 |
+| UI/UX and responsive design | 15 |
+| Reliability and performance | 10 |
+| Product differentiation and competitive value | 5 |
+| **Total** | **100** |
+
+For every category:
+
+- Give an honest score.
+- Explain the evidence supporting the score.
+- Identify remaining weaknesses.
+- Distinguish verified capabilities from untested assumptions.
+- Identify any issue that prevents commercial release.
+
+Then provide a direct verdict:
+
+1. Is Spark technically functional?
+2. Is the full user journey working?
+3. Are real Sandbox payment flows verified?
+4. Are subscriptions and quotas correctly enforced?
+5. Is user data sufficiently protected?
+6. Is the AI product-research experience genuinely useful and differentiated?
+7. Is the interface competition-ready?
+8. Is the application commercially ready, or are there outstanding release blockers?
+9. What are the three most important remaining improvements?
+
+Do not promise a competition placement. Give an honest assessment of Spark's actual competitiveness.
+
+## 18. Final Delivery Requirements
+
+Do not finish with a generic statement such as "Everything has been fixed."
+
+Deliver a final execution report containing:
+
+### A. Repairs Implemented
+List each actual problem discovered and the specific fix applied.
+
+### B. New Features
+Confirm the functional implementation of the settings center, archive/delete/restore controls, Price Watchlist, and requested interface changes.
+
+### C. Payments and Subscriptions
+Provide the results of the real PayPal Sandbox test cases, including verified payment and subscription status.
+
+### D. Authentication and Security
+Report the authentication tests, Firestore rules review, and user-isolation results.
+
+### E. Test Results
+Provide a table showing each test, its result, and supporting evidence.
+
+Use clear statuses:
+- PASS
+- FAIL
+- NOT TESTED
+- BLOCKED
+
+Never mark an untested item as PASS.
+
+### F. Remaining Defects
+List every unresolved issue, its severity, its impact, and what prevents its resolution.
+
+### G. Competition Assessment
+Provide the weighted score out of 100 and an honest verdict.
+
+### H. Release Recommendation
+Choose one:
+
+- READY FOR COMPETITION AND CONTROLLED COMMERCIAL TESTING
+- READY FOR COMPETITION, BUT NOT YET COMMERCIAL RELEASE
+- NOT READY — CRITICAL BLOCKERS REMAIN
+
+Only choose a status supported by the actual test evidence.
+
+---
+
+# FINAL EXECUTION COMMAND
+
+Begin by inspecting the complete existing Spark application.
+
+Then execute this mission in priority order:
+
+1. Fix subscription payment and quota deduction.
+2. Fix AI response output and remove internal metadata.
+3. Repair authentication, Firebase data integrity, and security.
+4. Fix the complete Channel3 product research workflow.
+5. Implement functional chat archive, restore, and deletion.
+6. Expand the settings center.
+7. Improve light mode.
+8. Remove the account-side balance display.
+9. Remove voice mode.
+10. Implement Spark Price Watchlist.
+11. Repair remaining UI, performance, and reliability issues.
+12. Run complete end-to-end tests.
+13. Fix failures and repeat the affected tests.
+14. Produce the honest final competition-readiness assessment.
+
+**Work directly in the existing project. Implement, verify, and repair. Prioritize correctness, security, real functionality, commercial integrity, and product quality over superficial visual changes. Do not stop at the first successful build. The mission is complete only when the critical workflows have been tested and the remaining limitations are clearly documented.**

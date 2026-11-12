@@ -4,20 +4,24 @@ import { PayPalSandboxEngine, SPARK_SANDBOX_TEST_CATALOG } from './paypalSandbox
 import type { RankedProductOffer } from '../types/spark';
 
 function createTestOffer(overrides: Partial<RankedProductOffer> = {}): RankedProductOffer {
+  const effectivePrice = overrides.price !== undefined ? overrides.price : 348.0;
   return {
-    id: overrides.id || 'ch3_offer_sony_xm5',
-    productId: overrides.productId || 'ch3_prod_sony_xm5',
+    id: overrides.id || overrides.productId || 'ch3_offer_sony_xm5',
+    productId: overrides.productId || overrides.id || 'ch3_prod_sony_xm5',
     name: overrides.name || 'Sony WH-1000XM5 Wireless Noise-Canceling Headphones',
     brand: overrides.brand || 'Sony',
     category: overrides.category || 'Audio & Headphones',
     description: overrides.description || 'Flagship active noise-canceling wireless headphones.',
-    price: overrides.price !== undefined ? overrides.price : 348.0,
+    summary: overrides.summary || 'Flagship active noise-canceling wireless headphones.',
+    price: effectivePrice,
     currency: overrides.currency || 'USD',
     priceStatus: overrides.priceStatus || 'verified',
     availabilityStatus: overrides.availabilityStatus || 'verified_in_stock',
     shippingText: overrides.shippingText ?? '$0.00 Free Verified Shipping',
     shippingCost: overrides.shippingCost !== undefined ? overrides.shippingCost : 0,
     shippingStatus: overrides.shippingStatus || 'verified',
+    estimatedTaxRate: overrides.estimatedTaxRate !== undefined ? overrides.estimatedTaxRate : null,
+    taxStatus: overrides.taxStatus || 'unknown',
     merchant: overrides.merchant || 'B&H Photo Video',
     rating: 4.8,
     reviewCount: 1420,
@@ -26,17 +30,20 @@ function createTestOffer(overrides: Partial<RankedProductOffer> = {}): RankedPro
     canonicalUrl: 'https://www.bhphotovideo.com/c/product/sony-wh1000xm5',
     sourceUrl: 'https://www.bhphotovideo.com/c/product/sony-wh1000xm5',
     sourceType: overrides.sourceType || 'channel3_api',
-    sourceId: 'channel3_api',
+    sourceId: overrides.sourceId || 'channel3_api',
+    sourceName: overrides.sourceName || 'Channel3 Product Graph API',
     sourceLabel: 'Channel3 Product Graph API',
     retrievedAt: new Date().toISOString(),
     freshnessStatus: 'live',
     verified: true,
+    verificationStatus: 'verified_live_source',
     verificationSummary: 'Live Channel3 product record',
     keySpecs: ['Color: Midnight Black', 'Edition: Standard Edition', 'Connectivity: Bluetooth 5.2'],
     specs: {
       Color: 'Midnight Black',
       Edition: 'Standard Edition',
       Category: overrides.category || 'Audio & Headphones',
+      ...(overrides.specs || {}),
     },
     pros: ['Industry-leading ANC', '30-hour battery life'],
     cons: ['Non-folding earcups'],
@@ -46,10 +53,16 @@ function createTestOffer(overrides: Partial<RankedProductOffer> = {}): RankedPro
     relevanceScore: 96,
     overallScore: 96,
     bestCoupon: null,
-    effectivePrice: overrides.price !== undefined ? overrides.price : 348.0,
+    couponDiscountAmount: 0,
+    netItemPrice: effectivePrice,
+    withinBudget: true,
+    completenessScore: 96,
+    couponStatus: 'no_verified_coupon',
+    checkoutStatus: 'supported_paypal',
+    effectivePrice,
     savingsAmount: 0,
     hasVerifiedCoupon: false,
-  } as RankedProductOffer;
+  };
 }
 
 describe('Spark Intelligent Cart System — Full-Stack Unit & Integration Suite', () => {

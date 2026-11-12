@@ -801,6 +801,9 @@ export function sanitizeUserPreferencesPatch(
     }
   }
 
+  const allowedAiTiers = new Set(['fast', 'balanced', 'deep']);
+  const allowedCompDepths = new Set(['concise', 'standard', 'exhaustive']);
+
   return {
     displayName: displayName || current.displayName,
     preferredName: preferredName || current.preferredName,
@@ -841,6 +844,38 @@ export function sanitizeUserPreferencesPatch(
           )
         ).slice(0, 20)
       : current.interestTags || [],
+    aiModelTier:
+      typeof src.aiModelTier === 'string' && allowedAiTiers.has(src.aiModelTier)
+        ? (src.aiModelTier as UserPreferences['aiModelTier'])
+        : (current.aiModelTier ?? 'balanced'),
+    aiComparisonDepth:
+      typeof src.aiComparisonDepth === 'string' && allowedCompDepths.has(src.aiComparisonDepth)
+        ? (src.aiComparisonDepth as UserPreferences['aiComparisonDepth'])
+        : (current.aiComparisonDepth ?? 'standard'),
+    aiAutoVerifyCitations:
+      typeof src.aiAutoVerifyCitations === 'boolean'
+        ? src.aiAutoVerifyCitations
+        : (current.aiAutoVerifyCitations ?? true),
+    searchHistoryLoggingConsent:
+      typeof src.searchHistoryLoggingConsent === 'boolean'
+        ? src.searchHistoryLoggingConsent
+        : (current.searchHistoryLoggingConsent ?? true),
+    notifyPriceDropAlerts:
+      typeof src.notifyPriceDropAlerts === 'boolean'
+        ? src.notifyPriceDropAlerts
+        : (current.notifyPriceDropAlerts ?? true),
+    notifyCouponExpiryAlerts:
+      typeof src.notifyCouponExpiryAlerts === 'boolean'
+        ? src.notifyCouponExpiryAlerts
+        : (current.notifyCouponExpiryAlerts ?? true),
+    notifyOrderStatusAlerts:
+      typeof src.notifyOrderStatusAlerts === 'boolean'
+        ? src.notifyOrderStatusAlerts
+        : (current.notifyOrderStatusAlerts ?? true),
+    regionCountry:
+      typeof src.regionCountry === 'string' && src.regionCountry.trim()
+        ? sanitizeTextAgainstXss(src.regionCountry.trim().toUpperCase(), 8)
+        : (current.regionCountry ?? 'US'),
   };
 }
 
@@ -995,7 +1030,7 @@ export function sanitizeCouponForAgent(coupon: CouponItem): CouponItem {
     code: sanitizeUntrustedFeedContent(coupon.code, 48),
     merchant: sanitizeUntrustedFeedContent(coupon.merchant, 100),
     description: sanitizeUntrustedFeedContent(coupon.description, 300),
-    terms: sanitizeUntrustedFeedContent(coupon.terms, 300),
+    terms: sanitizeUntrustedFeedContent(coupon.terms || '', 300),
     title: coupon.title ? sanitizeUntrustedFeedContent(coupon.title, 180) : coupon.title,
     sourceUrl: safeSourceUrl.valid && safeSourceUrl.safeUrl ? safeSourceUrl.safeUrl : '',
     trackedUrl:

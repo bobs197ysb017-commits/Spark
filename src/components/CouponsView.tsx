@@ -15,6 +15,7 @@ import {
   Store,
   Tag,
   TicketPercent,
+  ShoppingCart,
 } from 'lucide-react';
 import type {
   CouponItem,
@@ -23,18 +24,49 @@ import type {
   FeedicoNormalizedOffer,
   FeedicoStatusResponse,
   RankedProductOffer,
+  UserCartSummary,
 } from '../types/spark';
 import { buildAuthenticatedHeaders } from '../utils/authClient';
 
 export interface CouponsViewProps {
   sessionOffers: RankedProductOffer[];
   sessionCoupons: CouponItem[];
+  cart?: UserCartSummary | null;
+  onApplyCouponToCart?: (code: string) => Promise<{ ok: boolean; message: string }>;
+  onNavigateToCart?: () => void;
   onNotify?: (message: string) => void;
 }
+
+const VERIFIED_CART_PROMOS = [
+  {
+    code: 'SPARK10',
+    title: '10% Off Eligible Verified Orders ($50+ Min Spend)',
+    minSpend: 50,
+    discountLabel: '10% OFF',
+    categoryRequirement: null,
+  },
+  {
+    code: 'SAVE25',
+    title: '$25 Off Orders Over $150 ($150+ Min Spend)',
+    minSpend: 150,
+    discountLabel: '$25 OFF',
+    categoryRequirement: null,
+  },
+  {
+    code: 'AUDIO15',
+    title: '15% Off Audio, Headphones & Electronics ($80+ Min Spend)',
+    minSpend: 80,
+    discountLabel: '15% OFF',
+    categoryRequirement: 'Audio / Electronics',
+  },
+];
 
 export const CouponsView: React.FC<CouponsViewProps> = ({
   sessionOffers,
   sessionCoupons,
+  cart = null,
+  onApplyCouponToCart,
+  onNavigateToCart,
   onNotify,
 }) => {
   const [status, setStatus] = useState<FeedicoStatusResponse | null>(null);
@@ -51,6 +83,28 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedOfferId, setCopiedOfferId] = useState<string | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [applyingCode, setApplyingCode] = useState<string | null>(null);
+  const [cartApplyFeedback, setCartApplyFeedback] = useState<{
+    ok: boolean;
+    code: string;
+    message: string;
+  } | null>(null);
+
+  const handleApplyCodeToCart = async (code: string) => {
+    if (!onApplyCouponToCart || !code) return;
+    setApplyingCode(code);
+    setCartApplyFeedback(null);
+    try {
+      const res = await onApplyCouponToCart(code);
+      setCartApplyFeedback({
+        ok: res.ok,
+        code,
+        message: res.message,
+      });
+    } finally {
+      setApplyingCode(null);
+    }
+  };
 
   const loadFeedicoDiagnostics = useCallback(async (): Promise<FeedicoStatusResponse | null> => {
     let loadedStatus: FeedicoStatusResponse | null = null;
@@ -326,6 +380,126 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingCache ? 'animate-spin' : ''}`} />
           <span>Verify & Refresh Catalog</span>
         </button>
+      </div>
+
+      {/* Direct Cart Coupon Eligibility & Apply Panel */}
+      <div
+        data-testid="coupons-cart-integration-card"
+        className="rounded-2xl bg-[#12101B]/95 border border-violet-400/30 p-5 space-y-4"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-300">
+              <ShoppingCart className="w-4 h-4 text-violet-400" />
+              <span>Direct Cart Discount Eligibility &amp; Application</span>
+            </div>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              {cart && cart.itemCount > 0
+                ? `Active Cart: ${cart.itemCount} item(s) · Verified Subtotal: $${cart.subtotal.toFixed(2)} ${cart.currency}${
+                    cart.appliedCouponCode ? ` · Applied Code: ${cart.appliedCouponCode}` : ''
+                  }`
+                : 'Your Cart is currently empty. Add verified products to Cart to apply promotional codes directly before checkout.'}
+            </p>
+          </div>
+          {onNavigateToCart && (
+            <button
+              type="button"
+              data-testid="coupons-go-to-cart-btn"
+              onClick={onNavigateToCart}
+              className="px-3.5 py-1.5 rounded-xl bg-violet-600/25 hover:bg-violet-600/35 border border-violet-400/40 text-xs font-semibold text-violet-100 inline-flex items-center gap-1.5 self-start sm:self-center shrink-0 cursor-pointer"
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              <span>Open Cart ({cart?.itemCount || 0})</span>
+            </button>
+          )}
+        </div>
+
+        {cartApplyFeedback && (
+          <div
+            data-testid="coupons-cart-apply-feedback"
+            className={`p-3 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+              cartApplyFeedback.ok
+                ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-200'
+                : 'bg-amber-500/15 border-amber-500/35 text-amber-200'
+            }`}
+          >
+            <span>
+              <strong>[{cartApplyFeedback.code}]</strong> {cartApplyFeedback.message}
+            </span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {VERIFIED_CART_PROMOS.map((promo) => {
+            const cartSubtotal = cart?.subtotal || 0;
+            const cartEmpty = !cart || cart.itemCount === 0;
+            const meetsMinSpend = !cartEmpty && cartSubtotal >= promo.minSpend;
+            const isApplied = cart?.appliedCouponCode === promo.code;
+            const ineligibilityReason = cartEmpty
+              ? 'Requires at least 1 verified item in Cart'
+              : !meetsMinSpend
+              ? `Requires $${promo.minSpend.toFixed(2)} minimum Cart subtotal (currently $${cartSubtotal.toFixed(2)})`
+              : null;
+
+            return (
+              <div
+                key={promo.code}
+                data-testid={`cart-promo-card-${promo.code}`}
+                className={`p-3.5 rounded-xl border flex flex-col justify-between gap-3 ${
+                  isApplied
+                    ? 'bg-emerald-500/12 border-emerald-400/40'
+                    : meetsMinSpend
+                    ? 'bg-zinc-900/90 border-white/[0.1]'
+                    : 'bg-zinc-950/70 border-white/[0.06] opacity-85'
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs font-bold text-emerald-300 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30">
+                      {promo.code}
+                    </span>
+                    <span className="text-[11px] font-mono text-violet-300">
+                      {promo.discountLabel}
+                    </span>
+                  </div>
+                  <p className="text-xs font-medium text-white">{promo.title}</p>
+                  {ineligibilityReason ? (
+                    <p className="text-[11px] text-amber-300/90 font-mono">
+                      Ineligible: {ineligibilityReason}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-emerald-300/90 font-mono">
+                      Eligible for your current Cart
+                    </p>
+                  )}
+                </div>
+
+                {onApplyCouponToCart && (
+                  <button
+                    type="button"
+                    data-testid={`coupons-apply-to-cart-${promo.code}`}
+                    disabled={applyingCode === promo.code || isApplied}
+                    onClick={() => handleApplyCodeToCart(promo.code)}
+                    className={`w-full py-1.5 px-3 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer ${
+                      isApplied
+                        ? 'bg-emerald-600/30 border border-emerald-400/40 text-emerald-200'
+                        : 'bg-violet-600 hover:bg-violet-500 text-white'
+                    }`}
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    <span>
+                      {isApplied
+                        ? 'Applied to Cart'
+                        : applyingCode === promo.code
+                        ? 'Applying...'
+                        : 'Apply to Cart'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Feedico Connection & Cache Status Card */}
@@ -683,23 +857,41 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
 
                     <div className="flex flex-wrap sm:flex-col items-stretch sm:items-end gap-2 shrink-0">
                       {offer.coupon_code && !isExpired ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCopyCode(offer.feedico_offer_id, offer.coupon_code)
-                          }
-                          className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/35 text-xs font-mono font-semibold text-emerald-200 inline-flex items-center justify-center gap-2 cursor-pointer"
-                        >
-                          <span>{offer.coupon_code}</span>
-                          {isCopied ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-300" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5 text-emerald-300" />
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopyCode(offer.feedico_offer_id, offer.coupon_code)
+                            }
+                            className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/35 text-xs font-mono font-semibold text-emerald-200 inline-flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <span>{offer.coupon_code}</span>
+                            {isCopied ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-300" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5 text-emerald-300" />
+                            )}
+                          </button>
+                          {onApplyCouponToCart && (
+                            <button
+                              type="button"
+                              data-testid={`feedico-apply-to-cart-${offer.feedico_offer_id}`}
+                              disabled={applyingCode === offer.coupon_code}
+                              onClick={() => handleApplyCodeToCart(offer.coupon_code!)}
+                              className="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <ShoppingCart className="w-3.5 h-3.5" />
+                              <span>
+                                {cart?.appliedCouponCode === offer.coupon_code
+                                  ? 'Applied'
+                                  : 'Apply to Cart'}
+                              </span>
+                            </button>
                           )}
-                        </button>
+                        </div>
                       ) : (
                         <span className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-white/[0.08] text-[11px] font-mono text-zinc-400 text-center">
-                          {isExpired ? 'Expired' : 'No code needed'}
+                          {isExpired ? 'Expired — Cannot Apply' : 'No code needed'}
                         </span>
                       )}
 

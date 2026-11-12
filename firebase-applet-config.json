@@ -8,5 +8,14 @@
   "messagingSenderId": "790936242523",
   "measurementId": "",
   "oAuthClientId": "790936242523-98hslmm2d32aivf7g784k5g3k87e2co1.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "recaptchaSiteKey": "",
+  "authorizedDomains": [
+    "localhost",
+    "127.0.0.1",
+    "spark-ten-theta.vercel.app",
+    "ais-dev-3g5zvurtf6ldxz5u3eoxma-50712932913.europe-west1.run.app",
+    "ais-pre-3g5zvurtf6ldxz5u3eoxma-50712932913.europe-west1.run.app",
+    "gen-lang-client-0191581109.firebaseapp.com",
+    "gen-lang-client-0191581109.web.app"
+  ]
 }

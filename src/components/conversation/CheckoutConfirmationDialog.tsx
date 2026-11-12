@@ -11,6 +11,7 @@ import type {
 export interface CheckoutConfirmationDialogProps {
   product?: RankedProductOffer | null;
   fromCart?: boolean;
+  initialQuantity?: number;
   cart?: UserCartSummary | null;
   availableCoupons: CouponItem[];
   paypalStatus: PayPalConnectionStatus;

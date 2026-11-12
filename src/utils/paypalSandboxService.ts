@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import type {
+  AgentShoppingExecutionPayload,
+  AgentShoppingOrderSummaryPreview,
   CartCheckoutPreparationResult,
   CartItem,
   CartItemValidationFinding,
@@ -120,9 +122,32 @@ export const DEFAULT_PREVIEW_APP_URL =
   'https://ais-pre-3g5zvurtf6ldxz5u3eoxma-50712932913.europe-west1.run.app';
 export const DEV_PREVIEW_APP_URL =
   'https://ais-dev-3g5zvurtf6ldxz5u3eoxma-50712932913.europe-west1.run.app';
+export const VERCEL_PREVIEW_DOMAIN = 'spark-ten-theta.vercel.app';
+export const VERCEL_PREVIEW_APP_URL = `https://${VERCEL_PREVIEW_DOMAIN}`;
 export const DEFAULT_PAYPAL_CALLBACK_PATH = '/api/paypal/callback';
 export const LEGACY_PAYPAL_CALLBACK_PATH = '/api/integrations/paypal/callback';
 export const DEFAULT_PAYPAL_CONNECT_PATH = '/api/paypal/connect';
+
+const AUTHORIZED_SPARK_DOMAINS = new Set<string>([
+  'localhost',
+  '127.0.0.1',
+  VERCEL_PREVIEW_DOMAIN,
+  'ais-dev-3g5zvurtf6ldxz5u3eoxma-50712932913.europe-west1.run.app',
+  'ais-pre-3g5zvurtf6ldxz5u3eoxma-50712932913.europe-west1.run.app',
+  'gen-lang-client-0191581109.firebaseapp.com',
+  'gen-lang-client-0191581109.web.app',
+]);
+
+export function isAuthorizedSparkDomain(hostname: string): boolean {
+  const clean = (hostname || '').trim().toLowerCase();
+  if (!clean) return false;
+  if (AUTHORIZED_SPARK_DOMAINS.has(clean)) return true;
+  if (clean.endsWith('.vercel.app') && clean.startsWith('spark-')) return true;
+  if (clean.endsWith('.run.app') && (clean.startsWith('ais-dev-') || clean.startsWith('ais-pre-'))) {
+    return true;
+  }
+  return false;
+}
 
 export const DEFAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
 export const DEFAULT_CHECKOUT_SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -372,7 +397,9 @@ export function validatePayPalRedirectUri(
       const candidate = `${parsed.origin}${cleanPath}`;
       const isOfficialPreviewOrigin =
         parsed.origin === DEFAULT_PREVIEW_APP_URL ||
-        parsed.origin === DEV_PREVIEW_APP_URL;
+        parsed.origin === DEV_PREVIEW_APP_URL ||
+        parsed.origin === VERCEL_PREVIEW_APP_URL ||
+        isAuthorizedSparkDomain(parsed.hostname);
       if (candidate !== configured && !isOfficialPreviewOrigin) {
         return {
           valid: false,
@@ -649,6 +676,8 @@ export interface FirebaseAuthErrorDiagnostic {
   isSilentCancel: boolean;
   retryable: boolean;
   hostname?: string;
+  isPreAuthorizedSparkDomain?: boolean;
+  firebaseConsoleUrl?: string;
 }
 
 /**
@@ -710,8 +739,11 @@ export function classifyFirebaseAuthError(
       technicalHint: `Add "${safeHost}" in Firebase Console → Authentication → Settings → Authorized domains for project gen-lang-client-0191581109.`,
       shouldFallbackToRedirect: false,
       isSilentCancel: false,
-      retryable: false,
+      retryable: true,
       hostname: safeHost,
+      isPreAuthorizedSparkDomain: isAuthorizedSparkDomain(safeHost),
+      firebaseConsoleUrl:
+        'https://console.firebase.google.com/project/gen-lang-client-0191581109/authentication/settings',
     };
   }
 
@@ -849,6 +881,7 @@ export function validateFirebaseAuthEnvironmentConfig(
   const domainSet = new Set<string>([
     'localhost',
     '127.0.0.1',
+    VERCEL_PREVIEW_DOMAIN,
     'ais-dev-3g5zvurtf6ldxz5u3eoxma-50712932913.europe-west1.run.app',
     'ais-pre-3g5zvurtf6ldxz5u3eoxma-50712932913.europe-west1.run.app',
   ]);
@@ -858,6 +891,13 @@ export function validateFirebaseAuthEnvironmentConfig(
   }
   if (authDomain) {
     domainSet.add(authDomain);
+  }
+  if (Array.isArray(config.authorizedDomains)) {
+    for (const dom of config.authorizedDomains) {
+      if (typeof dom === 'string' && dom.trim()) {
+        domainSet.add(dom.trim());
+      }
+    }
   }
   for (const host of extraHostnames) {
     if (host && typeof host === 'string' && host.trim()) {
@@ -3325,7 +3365,7 @@ export class PayPalSandboxEngine {
     userId: string,
     options?: {
       expectedRevision?: number;
-      channel3LookupFn?: Parameters<PayPalSandboxService['validateCartItems']>[1] extends
+      channel3LookupFn?: Parameters<PayPalSandboxEngine['validateCartItems']>[1] extends
         | { channel3LookupFn?: infer F }
         | undefined
         ? F
@@ -7839,6 +7879,11 @@ export class PayPalSandboxEngine {
         ? 'AWAITING_CAPTURE'
         : 'PENDING';
 
+    const isDeclined =
+      tx.errorSummary?.issue === 'INSTRUMENT_DECLINED' ||
+      tx.errorSummary?.issue === 'DECLINED' ||
+      tx.errorSummary?.code === 'INSTRUMENT_DECLINED';
+
     const status: PurchaseRecord['status'] =
       tx.status === 'COMPLETED'
         ? 'completed'
@@ -7847,7 +7892,9 @@ export class PayPalSandboxEngine {
         : tx.status === 'CANCELLED'
         ? 'cancelled'
         : tx.status === 'FAILED'
-        ? 'failed'
+        ? isDeclined
+          ? 'declined'
+          : 'failed'
         : 'pending';
 
     const paymentStatus: NonNullable<PurchaseRecord['paymentStatus']> =
@@ -7860,7 +7907,9 @@ export class PayPalSandboxEngine {
         : tx.status === 'CANCELLED'
         ? 'CANCELLED'
         : tx.status === 'FAILED'
-        ? 'FAILED'
+        ? isDeclined
+          ? 'DECLINED'
+          : 'FAILED'
         : 'PENDING';
 
     const merchantOrderStatus =
@@ -7904,6 +7953,7 @@ export class PayPalSandboxEngine {
       merchantOrderStatus,
       status,
       createdAt: tx.createdAt,
+      completedAt: tx.status === 'COMPLETED' ? tx.updatedAt : null,
       updatedAt: tx.updatedAt,
       payerEmail: tx.payerEmail || tx.userEmail || 'sandbox-buyer@personal.example.com',
       webhookVerified: tx.webhookVerified,
@@ -11823,6 +11873,7 @@ export class PayPalSandboxEngine {
     userId?: string;
     orderId: string;
     expectedAmount?: number;
+    expectedCurrency?: string;
     mockApplicationCode?: string;
     payerEmailOverride?: string;
     enforceBuyerWalletBalance?: boolean;
@@ -11859,6 +11910,93 @@ export class PayPalSandboxEngine {
     };
     correlationId: string;
   }> {
+    const existingTx = this.getTransactionByAnyId(input.orderId);
+    const existingOrderRow = existingTx
+      ? this.sandboxPaymentOrdersTable.get(existingTx.sparkOrderId)
+      : this.sandboxPaymentOrdersTable.get(input.orderId);
+
+    // Check if an internal order exists that was never executed on PayPal Sandbox or never approved
+    if (existingOrderRow && !existingTx) {
+      return {
+        ok: false,
+        statusCode: 422,
+        errorCode: 'ORDER_NOT_APPROVED',
+        message: `Never capture an unapproved order: Order ${existingOrderRow.id} is in ${existingOrderRow.status} state and has not been created or approved on PayPal Sandbox.`,
+        orderRow: existingOrderRow,
+        correlationId: this.createCorrelationId('ord_cap_unapproved'),
+      };
+    }
+
+    // Check if order has expired before capture
+    if (
+      existingOrderRow &&
+      existingTx?.status !== 'COMPLETED' &&
+      (existingOrderRow.status === 'EXPIRED' ||
+        (existingOrderRow.expires_at && Date.parse(existingOrderRow.expires_at) < this.nowFn()))
+    ) {
+      existingOrderRow.status = 'EXPIRED';
+      if (existingTx) {
+        existingTx.lifecycleStatus = 'EXPIRED';
+      }
+      return {
+        ok: false,
+        statusCode: 410,
+        errorCode: 'order_expired',
+        message: `Order ${existingOrderRow.id} has expired and cannot be captured. Please initiate a new checkout.`,
+        transaction: existingTx || undefined,
+        orderRow: existingOrderRow,
+        correlationId: this.createCorrelationId('ord_cap_expired'),
+      };
+    }
+
+    // Verify expectedCurrency if provided
+    if (
+      existingTx &&
+      typeof input.expectedCurrency === 'string' &&
+      input.expectedCurrency.trim() &&
+      input.expectedCurrency.trim().toUpperCase() !== existingTx.currency
+    ) {
+      return {
+        ok: false,
+        statusCode: 400,
+        errorCode: 'tampered_currency_rejected',
+        message: `Capture currency mismatch: Submitted currency (${input.expectedCurrency
+          .trim()
+          .toUpperCase()}) does not match server-authoritative order currency (${existingTx.currency}).`,
+        transaction: existingTx,
+        orderRow: existingOrderRow,
+        correlationId: this.createCorrelationId('ord_cap_currency'),
+      };
+    }
+
+    // Strict Requirement 5 check: Confirm that order status is APPROVED (or already COMPLETED for idempotent calls)
+    if (
+      existingTx &&
+      existingTx.status === 'CREATED' &&
+      (!existingOrderRow || existingOrderRow.status !== 'APPROVED')
+    ) {
+      this.recordSecurityAudit({
+        userId: input.userId || existingTx.userId,
+        actor: 'buyer',
+        action: 'DUPLICATE_CAPTURE_BLOCKED',
+        sparkOrderId: existingTx.sparkOrderId,
+        paypalOrderId: existingTx.paypalOrderId,
+        checkoutSessionId: existingTx.checkoutSessionId,
+        outcome: 'DENIED',
+        detail: `Blocked capture attempt on unapproved PayPal Sandbox order ${existingTx.paypalOrderId} (status=${existingTx.status}).`,
+      });
+      return {
+        ok: false,
+        statusCode: 422,
+        errorCode: 'ORDER_NOT_APPROVED',
+        message: `Payer approval required (ORDER_NOT_APPROVED): Order ${existingTx.paypalOrderId} is in CREATED state and has not been approved by the buyer yet. Never capture an unapproved order.`,
+        transaction: existingTx,
+        orderRow: existingOrderRow,
+        buyerWallet: this.getBuyerSandboxWallet(existingTx.userId, existingTx.userEmail),
+        correlationId: this.createCorrelationId('ord_cap_not_approved'),
+      };
+    }
+
     const capRes = await this.captureOrder(input.orderId, {
       userId: input.userId,
       expectedAmount: input.expectedAmount,
@@ -11940,6 +12078,498 @@ export class PayPalSandboxEngine {
         } ${balanceBefore.toFixed(2)} to ${tx.currency} ${balanceAfter.toFixed(2)}.`,
       },
       correlationId: capRes.correlationId,
+    };
+  }
+
+  /**
+   * Executes AI Agent Product Verification, Intelligent Cart Management, and
+   * Order Summary & Explicit Consent preparation without EVER auto-authorizing payment.
+   */
+  public executeAgentShoppingAction(input: {
+    userId: string;
+    action:
+      | 'add_to_cart'
+      | 'prepare_purchase_consent'
+      | 'checkout_cart'
+      | 'update_cart_quantity'
+      | 'remove_from_cart'
+      | 'compare_with_cart'
+      | 'apply_cart_coupon'
+      | 'revalidate_cart_prices'
+      | 'query_payable_amount'
+      | 'clarify_ambiguous_product';
+    product?: RankedProductOffer | null;
+    quantity?: number;
+    targetItemQuery?: string | null;
+    couponCode?: string | null;
+    availableCoupons?: CouponItem[];
+    clarificationQuestion?: string | null;
+  }): AgentShoppingExecutionPayload {
+    const requestedQuantity = Math.max(1, Math.min(10, Math.floor(Number(input.quantity) || 1)));
+    const currentCart = this.getUserCart(input.userId);
+
+    const buildCartOrderSummary = (cartSnapshot: UserCartSummary): AgentShoppingOrderSummaryPreview | null => {
+      if (cartSnapshot.items.length === 0) return null;
+      const unknownCosts: string[] = [];
+      if (cartSnapshot.shippingStatus === 'unknown') {
+        unknownCosts.push('Merchant shipping cost not provided in Channel3 feed ($0.00 in Sandbox).');
+      }
+      if (cartSnapshot.taxStatus === 'unknown') {
+        unknownCosts.push('Regional tax rate not provided in Channel3 feed ($0.00 in Sandbox).');
+      }
+      const firstItem = cartSnapshot.items[0];
+      return {
+        productId: firstItem.productId,
+        productName:
+          cartSnapshot.items.length === 1
+            ? firstItem.productName
+            : `${firstItem.productName} + ${cartSnapshot.items.length - 1} more item(s)`,
+        imageUrl: firstItem.imageUrl,
+        merchant:
+          new Set(cartSnapshot.items.map((i) => i.merchant)).size === 1
+            ? firstItem.merchant
+            : `${firstItem.merchant} + ${new Set(cartSnapshot.items.map((i) => i.merchant)).size - 1} more`,
+        productUrl: firstItem.productUrl,
+        quantity: cartSnapshot.itemCount,
+        unitPrice: firstItem.unitPrice,
+        currency: cartSnapshot.currency,
+        subtotal: cartSnapshot.subtotal,
+        discount: cartSnapshot.verifiedDiscountTotal || 0,
+        shippingCost: cartSnapshot.shippingCost,
+        shippingStatus:
+          cartSnapshot.shippingStatus === 'verified' ||
+          cartSnapshot.shippingStatus === 'estimated' ||
+          cartSnapshot.shippingStatus === 'free'
+            ? cartSnapshot.shippingStatus
+            : 'unknown',
+        taxAmount: cartSnapshot.taxAmount,
+        taxStatus:
+          cartSnapshot.taxStatus === 'verified' || cartSnapshot.taxStatus === 'estimated'
+            ? cartSnapshot.taxStatus
+            : 'unknown',
+        otherKnownFees: 0,
+        finalKnownTotal:
+          typeof cartSnapshot.finalPayableTotal === 'number'
+            ? cartSnapshot.finalPayableTotal
+            : cartSnapshot.subtotal,
+        unknownOrUnconfirmedCosts: unknownCosts,
+      };
+    };
+
+    if (input.action === 'clarify_ambiguous_product') {
+      const question =
+        input.clarificationQuestion ||
+        'Multiple products or variants match your request. Please confirm the exact product and configuration you would like to add to your Cart or prepare for checkout.';
+      return {
+        action: 'clarify_ambiguous_product',
+        verifiedProduct: null,
+        quantity: requestedQuantity,
+        cart: currentCart,
+        orderSummary: buildCartOrderSummary(currentCart),
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        clarificationQuestion: question,
+        message: question,
+      };
+    }
+
+    if (input.action === 'query_payable_amount') {
+      if (currentCart.items.length === 0) {
+        return {
+          action: 'query_payable_amount',
+          verifiedProduct: null,
+          quantity: 0,
+          cart: currentCart,
+          orderSummary: null,
+          requiresExplicitUserConsent: true,
+          autoAuthorized: false,
+          message:
+            'Your Spark Cart is currently empty ($0.00). Add a verified product to calculate your itemized payable total.',
+        };
+      }
+      const summary = buildCartOrderSummary(currentCart)!;
+      const unknownNote =
+        summary.unknownOrUnconfirmedCosts.length > 0
+          ? ` Unconfirmed costs: ${summary.unknownOrUnconfirmedCosts.join(' ')}`
+          : ' All shipping and tax components are verified.';
+      return {
+        action: 'query_payable_amount',
+        verifiedProduct: null,
+        quantity: currentCart.itemCount,
+        cart: currentCart,
+        orderSummary: summary,
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        message: `Your Cart contains ${currentCart.itemCount} unit(s) across ${currentCart.uniqueProductCount} product(s). Subtotal: ${currentCart.currency} ${summary.subtotal.toFixed(2)}, Verified Discount: -${currentCart.currency} ${summary.discount.toFixed(2)}, Final Known Payable Amount: ${currentCart.currency} ${summary.finalKnownTotal.toFixed(2)}.${unknownNote}`,
+      };
+    }
+
+    if (input.action === 'update_cart_quantity') {
+      if (currentCart.items.length === 0) {
+        return {
+          action: 'rejected_unverified',
+          verifiedProduct: null,
+          quantity: requestedQuantity,
+          cart: currentCart,
+          orderSummary: null,
+          requiresExplicitUserConsent: true,
+          autoAuthorized: false,
+          rejectionReason: 'Cannot update quantity because your Cart is currently empty.',
+          message: 'Your Cart is currently empty. Add a verified product first before updating quantities.',
+        };
+      }
+      const targetQuery = (input.targetItemQuery || '').toLowerCase().trim();
+      const targetItem =
+        (targetQuery
+          ? currentCart.items.find((i) =>
+              i.productName.toLowerCase().includes(targetQuery) ||
+              i.merchant.toLowerCase().includes(targetQuery)
+            )
+          : null) || currentCart.items[currentCart.items.length - 1];
+
+      const updateRes = this.updateCartItemQuantity({
+        userId: input.userId,
+        itemId: targetItem.itemId,
+        quantity: requestedQuantity,
+      });
+      const updatedCart = updateRes.cart || this.getUserCart(input.userId);
+      return {
+        action: 'update_cart_quantity',
+        verifiedProduct: null,
+        quantity: requestedQuantity,
+        cart: updatedCart,
+        orderSummary: buildCartOrderSummary(updatedCart),
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        message: `Updated "${targetItem.productName}" quantity to ${requestedQuantity} in your Cart. Updated Cart subtotal: ${updatedCart.currency} ${updatedCart.subtotal.toFixed(2)}.`,
+      };
+    }
+
+    if (input.action === 'remove_from_cart') {
+      if (currentCart.items.length === 0) {
+        return {
+          action: 'rejected_unverified',
+          verifiedProduct: null,
+          quantity: 0,
+          cart: currentCart,
+          orderSummary: null,
+          requiresExplicitUserConsent: true,
+          autoAuthorized: false,
+          rejectionReason: 'Your Cart is already empty.',
+          message: 'Your Cart is already empty — there are no items to remove.',
+        };
+      }
+      const targetQuery = (input.targetItemQuery || '').toLowerCase().trim();
+      const targetItem =
+        (targetQuery
+          ? currentCart.items.find((i) =>
+              i.productName.toLowerCase().includes(targetQuery) ||
+              i.merchant.toLowerCase().includes(targetQuery)
+            )
+          : null) || currentCart.items[currentCart.items.length - 1];
+
+      const remRes = this.removeCartItem({
+        userId: input.userId,
+        itemId: targetItem.itemId,
+      });
+      const updatedCart = remRes.cart || this.getUserCart(input.userId);
+      return {
+        action: 'remove_from_cart',
+        verifiedProduct: null,
+        quantity: updatedCart.itemCount,
+        cart: updatedCart,
+        orderSummary: buildCartOrderSummary(updatedCart),
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        message: `Removed "${targetItem.productName}" (${targetItem.merchant}) from your Cart. Remaining items: ${updatedCart.itemCount} (${updatedCart.currency} ${updatedCart.subtotal.toFixed(2)}).`,
+      };
+    }
+
+    if (input.action === 'compare_with_cart') {
+      const candidate = input.product || null;
+      if (currentCart.items.length === 0 || !candidate) {
+        return {
+          action: 'compare_with_cart',
+          verifiedProduct: candidate,
+          quantity: currentCart.itemCount,
+          cart: currentCart,
+          orderSummary: buildCartOrderSummary(currentCart),
+          requiresExplicitUserConsent: true,
+          autoAuthorized: false,
+          comparedAlternative: candidate,
+          message:
+            currentCart.items.length === 0
+              ? 'Your Cart is currently empty. Add an item to your Cart first to compare it against alternatives.'
+              : 'No verified alternative product was found to compare against your Cart.',
+        };
+      }
+      const cartItem = currentCart.items[currentCart.items.length - 1];
+      const delta =
+        typeof candidate.price === 'number'
+          ? Number((candidate.price - cartItem.unitPrice).toFixed(2))
+          : null;
+      const deltaText =
+        delta === null
+          ? 'unverified price difference'
+          : delta < 0
+          ? `${candidate.currency} ${Math.abs(delta).toFixed(2)} cheaper per unit`
+          : delta > 0
+          ? `${candidate.currency} ${delta.toFixed(2)} more expensive per unit`
+          : 'identical unit price';
+      return {
+        action: 'compare_with_cart',
+        verifiedProduct: candidate,
+        quantity: currentCart.itemCount,
+        cart: currentCart,
+        orderSummary: buildCartOrderSummary(currentCart),
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        comparedAlternative: candidate,
+        message: `Cart Comparison: Your Cart item "${cartItem.productName}" (${cartItem.merchant}, ${cartItem.currency} ${cartItem.unitPrice.toFixed(2)}) vs. alternative "${candidate.name}" (${candidate.merchant}, ${candidate.currency} ${candidate.price?.toFixed(2) ?? 'N/A'}) — the alternative is ${deltaText}.`,
+      };
+    }
+
+    if (input.action === 'apply_cart_coupon') {
+      if (currentCart.items.length === 0) {
+        return {
+          action: 'rejected_unverified',
+          verifiedProduct: null,
+          quantity: 0,
+          cart: currentCart,
+          orderSummary: null,
+          requiresExplicitUserConsent: true,
+          autoAuthorized: false,
+          rejectionReason: 'Add a verified product to your Cart before applying a coupon.',
+          message: 'Your Cart is empty. Add a verified product before applying a coupon.',
+        };
+      }
+      const matchedCoupon =
+        (input.couponCode
+          ? (input.availableCoupons || []).find(
+              (c) => c.code.toUpperCase() === input.couponCode!.toUpperCase()
+            )
+          : (input.availableCoupons || []).find(
+              (c) => c.verificationStatus === 'verified' && c.code && c.code !== 'NO_CODE_NEEDED'
+            )) || null;
+      const codeToTry = input.couponCode || matchedCoupon?.code || '';
+      if (!codeToTry) {
+        return {
+          action: 'apply_cart_coupon',
+          verifiedProduct: null,
+          quantity: currentCart.itemCount,
+          cart: currentCart,
+          orderSummary: buildCartOrderSummary(currentCart),
+          requiresExplicitUserConsent: true,
+          autoAuthorized: false,
+          appliedCouponCode: null,
+          message:
+            'No verified coupon code was found for the merchants currently in your Cart. Spark never fabricates promotional codes.',
+        };
+      }
+      const couponRes = this.applyCartCoupon({
+        userId: input.userId,
+        couponCode: codeToTry,
+        coupon: matchedCoupon,
+      });
+      return {
+        action: 'apply_cart_coupon',
+        verifiedProduct: null,
+        quantity: couponRes.cart.itemCount,
+        cart: couponRes.cart,
+        orderSummary: buildCartOrderSummary(couponRes.cart),
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        appliedCouponCode: couponRes.ok ? codeToTry : null,
+        message: couponRes.message,
+      };
+    }
+
+    if (input.action === 'revalidate_cart_prices') {
+      const summary = buildCartOrderSummary(currentCart);
+      const changedItems = currentCart.items.filter((i) => i.priceChanged);
+      const unavailableItems = currentCart.items.filter((i) => i.availability !== 'in_stock');
+      const statusMsg =
+        currentCart.items.length === 0
+          ? 'Your Cart is currently empty.'
+          : changedItems.length === 0 && unavailableItems.length === 0
+          ? `Live Cart price revalidation complete: All ${currentCart.items.length} product(s) remain in stock at their verified unit prices (Total: ${currentCart.currency} ${(summary?.finalKnownTotal ?? currentCart.subtotal).toFixed(2)}).`
+          : `Live Cart price revalidation detected ${changedItems.length} price change(s) and ${unavailableItems.length} unavailable item(s). Review your Cart before checkout.`;
+      return {
+        action: 'revalidate_cart_prices',
+        verifiedProduct: null,
+        quantity: currentCart.itemCount,
+        cart: currentCart,
+        orderSummary: summary,
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        message: statusMsg,
+      };
+    }
+
+    if (input.action === 'checkout_cart') {
+      if (currentCart.items.length === 0) {
+        return {
+          action: 'rejected_unverified',
+          verifiedProduct: null,
+          quantity: requestedQuantity,
+          cart: currentCart,
+          orderSummary: null,
+          requiresExplicitUserConsent: true,
+          autoAuthorized: false,
+          rejectionReason: 'Your cart is currently empty. Add a verified product before checking out.',
+          message: 'Your cart is empty. Please select a verified product first.',
+        };
+      }
+      const summary = buildCartOrderSummary(currentCart)!;
+      return {
+        action: 'checkout_cart',
+        verifiedProduct: null,
+        quantity: currentCart.itemCount,
+        cart: currentCart,
+        orderSummary: summary,
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        message: `Prepared Order Summary for your Cart (${currentCart.itemCount} item(s), ${currentCart.currency} ${summary.finalKnownTotal.toFixed(2)}). Explicit user consent is required before creating a PayPal Sandbox order.`,
+      };
+    }
+
+    const candidate = input.product;
+    if (!candidate) {
+      return {
+        action: 'rejected_unverified',
+        verifiedProduct: null,
+        quantity: requestedQuantity,
+        cart: this.getUserCart(input.userId),
+        orderSummary: null,
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        rejectionReason: 'No verified Channel3 product matched the purchase request.',
+        message: 'Could not verify a product for purchase: no verified Channel3 offer found.',
+      };
+    }
+
+    // 1. Strict Product Verification (identity, merchant, price, currency, availability, URL)
+    const hasIdentity = Boolean(candidate.id && candidate.id.trim() && candidate.name && candidate.name.trim());
+    const hasMerchant = Boolean(candidate.merchant && candidate.merchant.trim() && candidate.merchant !== 'Unknown');
+    const hasVerifiedPrice =
+      typeof candidate.price === 'number' &&
+      Number.isFinite(candidate.price) &&
+      candidate.price > 0 &&
+      candidate.priceStatus === 'verified';
+    const hasValidCurrency =
+      candidate.currency === 'USD' || candidate.currency === 'EUR' || candidate.currency === 'GBP';
+    const isOutOfStock =
+      candidate.availabilityStatus === 'verified_out_of_stock' ||
+      candidate.availability === 'out_of_stock';
+    const resolvedUrl = candidate.canonicalUrl || candidate.sourceUrl || '';
+    const hasValidUrl = /^https?:\/\//i.test(resolvedUrl);
+
+    if (
+      !hasIdentity ||
+      !hasMerchant ||
+      !hasVerifiedPrice ||
+      !hasValidCurrency ||
+      isOutOfStock ||
+      !hasValidUrl
+    ) {
+      const reason = !hasIdentity
+        ? 'Missing verified product identity.'
+        : !hasMerchant
+        ? 'Missing verified merchant information.'
+        : !hasVerifiedPrice
+        ? 'Product price is missing or unverified.'
+        : !hasValidCurrency
+        ? 'Unsupported or missing currency.'
+        : isOutOfStock
+        ? 'Product is currently out of stock.'
+        : 'Missing valid canonical merchant product URL.';
+
+      return {
+        action: 'rejected_unverified',
+        verifiedProduct: null,
+        quantity: requestedQuantity,
+        cart: this.getUserCart(input.userId),
+        orderSummary: null,
+        requiresExplicitUserConsent: true,
+        autoAuthorized: false,
+        rejectionReason: reason,
+        message: `Rejected product "${candidate.name || 'Unknown'}": ${reason}`,
+      };
+    }
+
+    // Register verified live offer and add to actual Cart
+    this.registerVerifiedLiveOffer(candidate);
+    const cartRes = this.addToCart({
+      userId: input.userId,
+      product: candidate,
+      quantity: requestedQuantity,
+    });
+
+    const unitPrice = Number(candidate.price!.toFixed(2));
+    const subtotal = Number((unitPrice * requestedQuantity).toFixed(2));
+    const shippingCost =
+      candidate.shippingStatus === 'verified' && typeof candidate.shippingCost === 'number'
+        ? candidate.shippingCost
+        : candidate.shippingStatus === 'free'
+        ? 0
+        : null;
+    const taxAmount =
+      candidate.taxStatus === 'verified' && typeof candidate.estimatedTaxRate === 'number'
+        ? Number((subtotal * candidate.estimatedTaxRate).toFixed(2))
+        : null;
+    const finalKnownTotal = Number(
+      (subtotal + (shippingCost ?? 0) + (taxAmount ?? 0)).toFixed(2)
+    );
+
+    const unknownCosts: string[] = [];
+    if (candidate.shippingStatus !== 'verified' && candidate.shippingStatus !== 'free') {
+      unknownCosts.push(
+        'Live merchant shipping cost was not provided in Channel3 data ($0.00 in Sandbox).'
+      );
+    }
+    if (candidate.taxStatus !== 'verified') {
+      unknownCosts.push(
+        'Regional tax rate was not provided in Channel3 data ($0.00 in Sandbox).'
+      );
+    }
+
+    const orderSummary: AgentShoppingOrderSummaryPreview = {
+      productId: candidate.id,
+      productName: candidate.name,
+      imageUrl: candidate.imageUrl || null,
+      merchant: candidate.merchant,
+      productUrl: resolvedUrl,
+      quantity: requestedQuantity,
+      unitPrice,
+      currency: candidate.currency,
+      subtotal,
+      discount: 0,
+      shippingCost,
+      shippingStatus:
+        candidate.shippingStatus === 'verified' ||
+        candidate.shippingStatus === 'free' ||
+        candidate.shippingStatus === 'estimated'
+          ? candidate.shippingStatus
+          : 'unknown',
+      taxAmount,
+      taxStatus: candidate.taxStatus === 'verified' ? 'verified' : 'unknown',
+      otherKnownFees: 0,
+      finalKnownTotal,
+      unknownOrUnconfirmedCosts: unknownCosts,
+    };
+
+    return {
+      action: input.action,
+      verifiedProduct: candidate,
+      quantity: requestedQuantity,
+      cart: cartRes.cart || this.getUserCart(input.userId),
+      orderSummary,
+      requiresExplicitUserConsent: true,
+      autoAuthorized: false,
+      message:
+        input.action === 'add_to_cart'
+          ? `Verified "${candidate.name}" (${candidate.merchant}) via Channel3 and added ${requestedQuantity} × ${candidate.currency} ${unitPrice.toFixed(2)} to your Cart. Payment is never auto-authorized.`
+          : `Verified "${candidate.name}" (${candidate.merchant}) via Channel3 and prepared Order Summary (${requestedQuantity} × ${candidate.currency} ${unitPrice.toFixed(2)} = ${candidate.currency} ${finalKnownTotal.toFixed(2)}). Explicit user consent is required before creating a PayPal Sandbox order.`,
     };
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "Spark — Intelligent AI Shopping Companion",
   "description": "A product discovery and shopping platform that helps users search live catalogs, verify coupons, compare merchant offers, inspect chemical compounds, and complete user-confirmed purchases through PayPal.",
-  "requestFramePermissions": ["geolocation"],
+  "requestFramePermissions": ["geolocation", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -35,6 +35,7 @@ interface PurchaseConfirmationModalProps {
   product?: RankedProductOffer | null;
   cart?: UserCartSummary | null;
   fromCart?: boolean;
+  initialQuantity?: number;
   availableCoupons: CouponItem[];
   paypalStatus: PayPalConnectionStatus;
   paypalEmail?: string;
@@ -52,6 +53,7 @@ export const PurchaseConfirmationModal: React.FC<PurchaseConfirmationModalProps>
   product,
   cart,
   fromCart = false,
+  initialQuantity = 1,
   availableCoupons,
   paypalStatus,
   paypalEmail,
@@ -65,7 +67,9 @@ export const PurchaseConfirmationModal: React.FC<PurchaseConfirmationModalProps>
   onPurchaseSuccess,
 }) => {
   const isCartCheckout = Boolean(fromCart && !product);
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(() =>
+    Math.max(1, Math.min(10, Math.floor(Number(initialQuantity) || 1)))
+  );
   const [selectedCouponCode, setSelectedCouponCode] = useState<string | null>(
     !isCartCheckout ? product?.bestCoupon?.code || null : null
   );
@@ -190,6 +194,14 @@ export const PurchaseConfirmationModal: React.FC<PurchaseConfirmationModalProps>
   useEffect(() => {
     fetchBuyerWallet();
   }, [fetchBuyerWallet]);
+
+  // Any external change to the selected product, initial quantity, or cart revision/total invalidates previous consent
+  useEffect(() => {
+    if (!isCartCheckout && initialQuantity) {
+      setQuantity(Math.max(1, Math.min(10, Math.floor(Number(initialQuantity) || 1))));
+    }
+    setUserConfirmedTerms(false);
+  }, [product?.id, initialQuantity, isCartCheckout, cart?.revision, cart?.finalPayableTotal]);
 
   const resetAuthorizationFlow = () => {
     setUserConfirmedTerms(false);
@@ -417,7 +429,7 @@ export const PurchaseConfirmationModal: React.FC<PurchaseConfirmationModalProps>
     }
   };
 
-  // STEP 5 & 6: Mark Buyer Approved & Capture Payment on Server (`POST /v2/checkout/orders/{id}/capture`)
+  // STEP 5 & 6: Retrieve Order Status, Confirm APPROVED & Exact Match, then Capture Payment on Server (`POST /v2/checkout/orders/{id}/capture`)
   const handleCaptureAuthorizedSandboxPayment = async () => {
     if (!paypalOrderId && !orderRow?.id) return;
     if (workflowStep === 'capturing' || workflowStep === 'completed') return;
@@ -425,6 +437,8 @@ export const PurchaseConfirmationModal: React.FC<PurchaseConfirmationModalProps>
     setWorkflowStep('capturing');
 
     const targetId = orderRow?.id || paypalOrderId!;
+    const expectedAmount = orderRow?.amount ?? sandboxTotalPreview.total;
+    const expectedCurrency = orderRow?.currency ?? sandboxTotalPreview.currency;
 
     try {
       await fetch(`/api/paypal/sandbox/orders/${encodeURIComponent(targetId)}/approve`, {
@@ -436,13 +450,49 @@ export const PurchaseConfirmationModal: React.FC<PurchaseConfirmationModalProps>
         }),
       });
 
+      // Step 5a: Retrieve actual PayPal order status from the server and verify APPROVED state, amount, and currency before Capture
+      const statusRes = await fetch(`/api/paypal/sandbox/orders/${encodeURIComponent(targetId)}`, {
+        method: 'GET',
+        headers: buildAuthenticatedHeaders({ method: 'GET' }),
+      });
+      const statusData = await statusRes.json().catch(() => null);
+      const serverTx = statusData?.transaction;
+      if (
+        !statusRes.ok ||
+        !statusData?.ok ||
+        !serverTx ||
+        (serverTx.status !== 'APPROVED' && serverTx.status !== 'COMPLETED')
+      ) {
+        setWorkflowStep('failed');
+        setErrorMessage(
+          statusData?.message ||
+            'Cannot capture payment: PayPal Sandbox order has not been approved by the buyer (status must be APPROVED).'
+        );
+        return;
+      }
+
+      if (
+        Math.abs(Number(serverTx.amount) - expectedAmount) > 0.01 ||
+        serverTx.currency !== expectedCurrency
+      ) {
+        setWorkflowStep('failed');
+        setErrorMessage(
+          `Order verification mismatch: Approved order amount (${serverTx.currency} ${Number(
+            serverTx.amount
+          ).toFixed(2)}) does not match confirmed checkout total (${expectedCurrency} ${expectedAmount.toFixed(
+            2
+          )}).`
+        );
+        return;
+      }
+
       const capRes = await fetch('/api/paypal/agent/capture-order', {
         method: 'POST',
         headers: buildAuthenticatedHeaders({ method: 'POST' }),
         body: JSON.stringify({
           orderIdOrPayPalId: targetId,
-          expectedAmount: orderRow?.amount ?? sandboxTotalPreview.total,
-          expectedCurrency: orderRow?.currency ?? sandboxTotalPreview.currency,
+          expectedAmount,
+          expectedCurrency,
         }),
       });
       const capData = await capRes.json();
@@ -898,6 +948,13 @@ export const PurchaseConfirmationModal: React.FC<PurchaseConfirmationModalProps>
               <span>Taxes</span>
               <span data-testid="checkout-tax-disclosure" className="font-mono tabular-nums">
                 {formatTaxDisclosure()}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-zinc-400">
+              <span>Other Known Fees</span>
+              <span data-testid="checkout-fees-disclosure" className="font-mono tabular-nums">
+                {sandboxTotalPreview.currency} 0.00 (No additional platform fees)
               </span>
             </div>
 

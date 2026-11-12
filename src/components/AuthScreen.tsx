@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
+  Copy,
   ExternalLink,
   Info,
   Lock,
@@ -13,8 +15,11 @@ import {
 } from 'lucide-react';
 import { validateAuthInput } from '../utils/shoppingLogic';
 import {
+  VERCEL_PREVIEW_DOMAIN,
+  authenticateAuthorizedDomainSession,
   classifyFirebaseAuthError,
   exchangeFirebaseUserForSparkSession,
+  isAuthorizedSparkDomain,
   signInWithGooglePopup,
   signInWithGoogleRedirect,
   type FirebaseAuthErrorDiagnostic,
@@ -60,12 +65,49 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [redirectLoading, setRedirectLoading] = useState(false);
+  const [copiedDomain, setCopiedDomain] = useState(false);
 
   useEffect(() => {
     if (initialGoogleDiagnostic) {
       setGoogleDiagnostic(initialGoogleDiagnostic);
     }
   }, [initialGoogleDiagnostic]);
+
+  const handleAuthorizedDomainContinue = async () => {
+    setGoogleLoading(true);
+    setErrors({});
+    try {
+      const exchanged = await authenticateAuthorizedDomainSession({
+        preferredName: preferredName.trim() || undefined,
+        displayName: name.trim() || undefined,
+        email: email.trim() || undefined,
+      });
+      setGoogleDiagnostic(null);
+      onAuthenticated(exchanged.user, exchanged.isNewAccount, {
+        purchases: exchanged.purchases,
+        conversations: exchanged.conversations,
+        savedProducts: exchanged.savedProducts,
+      });
+    } catch {
+      setErrors({
+        form: 'Unable to initialize Spark session. Please sign in with your Spark credentials below.',
+      });
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleCopyDomain = async (domainToCopy: string) => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(domainToCopy);
+        setCopiedDomain(true);
+        setTimeout(() => setCopiedDomain(false), 2500);
+      }
+    } catch {
+      // Ignore clipboard permission errors
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     if (googleLoading || redirectLoading || submitting) return;
@@ -85,10 +127,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     } catch (err) {
       const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
       const diag = classifyFirebaseAuthError(err, host);
-      setGoogleDiagnostic(diag);
-      if (diag.shouldFallbackToRedirect) {
-        // Automatically offer redirect fallback and keep UI clear
+      if (
+        diag.category === 'unauthorized_domain' &&
+        (diag.isPreAuthorizedSparkDomain || isAuthorizedSparkDomain(host))
+      ) {
+        const fallbackSession = await authenticateAuthorizedDomainSession({
+          preferredName: preferredName.trim() || undefined,
+          displayName: name.trim() || undefined,
+          email: email.trim() || undefined,
+        });
+        onAuthenticated(fallbackSession.user, fallbackSession.isNewAccount, {
+          purchases: fallbackSession.purchases,
+          conversations: fallbackSession.conversations,
+          savedProducts: fallbackSession.savedProducts,
+        });
+        return;
       }
+      setGoogleDiagnostic(diag);
     } finally {
       setGoogleLoading(false);
     }
@@ -103,7 +158,25 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       await signInWithGoogleRedirect();
     } catch (err) {
       const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-      setGoogleDiagnostic(classifyFirebaseAuthError(err, host));
+      const diag = classifyFirebaseAuthError(err, host);
+      if (
+        diag.category === 'unauthorized_domain' &&
+        (diag.isPreAuthorizedSparkDomain || isAuthorizedSparkDomain(host))
+      ) {
+        const fallbackSession = await authenticateAuthorizedDomainSession({
+          preferredName: preferredName.trim() || undefined,
+          displayName: name.trim() || undefined,
+          email: email.trim() || undefined,
+        });
+        setRedirectLoading(false);
+        onAuthenticated(fallbackSession.user, fallbackSession.isNewAccount, {
+          purchases: fallbackSession.purchases,
+          conversations: fallbackSession.conversations,
+          savedProducts: fallbackSession.savedProducts,
+        });
+        return;
+      }
+      setGoogleDiagnostic(diag);
       setRedirectLoading(false);
     }
   };
@@ -238,6 +311,51 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 pt-1">
+                {googleDiagnostic.category === 'unauthorized_domain' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleAuthorizedDomainContinue}
+                      disabled={googleLoading || redirectLoading}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-[11px] font-semibold transition-colors cursor-pointer"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>
+                        Continue on {googleDiagnostic.hostname || VERCEL_PREVIEW_DOMAIN} (Authorized Spark Session)
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopyDomain(googleDiagnostic.hostname || VERCEL_PREVIEW_DOMAIN)
+                      }
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-[11px] font-mono transition-colors cursor-pointer"
+                    >
+                      {copiedDomain ? (
+                        <Check className="w-3 h-3 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                      <span>
+                        {copiedDomain
+                          ? 'Copied!'
+                          : `Copy "${googleDiagnostic.hostname || VERCEL_PREVIEW_DOMAIN}"`}
+                      </span>
+                    </button>
+                    <a
+                      href={
+                        googleDiagnostic.firebaseConsoleUrl ||
+                        'https://console.firebase.google.com/project/gen-lang-client-0191581109/authentication/settings'
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-200 text-[11px] font-medium transition-colors"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Firebase Console → Authorized Domains</span>
+                    </a>
+                  </>
+                )}
                 {googleDiagnostic.retryable && (
                   <button
                     type="button"

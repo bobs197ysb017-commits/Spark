@@ -27,6 +27,7 @@ import type {
   PayPalSandboxCatalogItem,
   PurchaseRecord,
   RankedProductOffer,
+  SavedProductRevalidationItem,
   ScienceCompoundMetadata,
   SubscriptionPlanId,
   SubscriptionQuotaStatus,
@@ -37,10 +38,13 @@ import type {
 } from './types/spark';
 import {
   auth,
+  authenticateAuthorizedDomainSession,
   consumeGoogleRedirectResult,
   deleteConversationFromFirestore,
   deletePayPalConnectionFromFirestore,
   exchangeFirebaseUserForSparkSession,
+  fetchUserPurchasesFromFirestore,
+  isAuthorizedSparkDomain,
   loadUserCartFromFirestore,
   logSearchAuditToFirestore,
   onAuthStateChanged,
@@ -53,6 +57,7 @@ import {
   savePurchaseRecordToFirestore,
   signOutFirebase,
   subscribeToUserCartInFirestore,
+  subscribeToUserPurchasesInFirestore,
   updateUserFirestorePreferences,
   type FirebaseAuthErrorDiagnostic,
 } from './firebase';
@@ -100,6 +105,7 @@ import {
 import { CheckoutConfirmationDialog } from './components/conversation/CheckoutConfirmationDialog';
 import { AgGridAnalyticsWorkspace } from './components/analytics/AgGridAnalyticsWorkspace';
 import { SubscriptionPlansView } from './components/subscription/SubscriptionPlansView';
+import { SavedProductsView } from './components/SavedProductsView';
 
 const VALID_NAV_SECTIONS: NavSection[] = [
   'conversation',
@@ -212,8 +218,12 @@ export default function App() {
   // Shortlists: Comparison, Saved Products, Details Inspector, Cart, Checkout
   const [comparedProductIds, setComparedProductIds] = useState<string[]>([]);
   const [savedProducts, setSavedProducts] = useState<RankedProductOffer[]>([]);
+  const [isRevalidatingSaved, setIsRevalidatingSaved] = useState(false);
+  const [savedRevalidationFindings, setSavedRevalidationFindings] = useState<SavedProductRevalidationItem[]>([]);
+  const [lastSavedRevalidatedAt, setLastSavedRevalidatedAt] = useState<string | null>(null);
   const [inspectedProduct, setInspectedProduct] = useState<RankedProductOffer | null>(null);
   const [productForCheckout, setProductForCheckout] = useState<RankedProductOffer | null>(null);
+  const [checkoutInitialQuantity, setCheckoutInitialQuantity] = useState<number>(1);
   const [cart, setCart] = useState<UserCartSummary | null>(null);
   const [cartLoading, setCartLoading] = useState<boolean>(false);
   const [cartSyncState, setCartSyncState] = useState<'synced' | 'syncing' | 'offline_cached' | 'error'>('synced');
@@ -289,10 +299,25 @@ export default function App() {
     }, 1200);
 
     consumeGoogleRedirectResult()
-      .then((redirectOutcome) => {
-        if (mounted && redirectOutcome.errorDiagnostic) {
-          setGoogleRedirectDiagnostic(redirectOutcome.errorDiagnostic);
+      .then(async (redirectOutcome) => {
+        if (!mounted || !redirectOutcome.errorDiagnostic) return;
+        const diag = redirectOutcome.errorDiagnostic;
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+        if (
+          diag.category === 'unauthorized_domain' &&
+          (diag.isPreAuthorizedSparkDomain || isAuthorizedSparkDomain(host))
+        ) {
+          const fallbackSession = await authenticateAuthorizedDomainSession();
+          if (mounted && !resolvedAuth) {
+            resolvedAuth = true;
+            setUser(fallbackSession.user);
+            setPurchases(fallbackSession.purchases);
+            setConversations(fallbackSession.conversations);
+            setAuthLoading(false);
+          }
+          return;
         }
+        setGoogleRedirectDiagnostic(diag);
       })
       .catch(() => {});
 
@@ -389,7 +414,7 @@ export default function App() {
     if (auth.currentUser && user?.id && auth.currentUser.uid === user.id) {
       persistUserCartToFirestore(auth.currentUser.uid, nextCart)
         .then((res) => {
-          if (res.ok) {
+          if (res.persisted) {
             setCartSyncState('synced');
           }
         })
@@ -488,33 +513,49 @@ export default function App() {
       if (auth.currentUser && auth.currentUser.uid === user.id) {
         const unsubCart = subscribeToUserCartInFirestore(
           auth.currentUser.uid,
-          (remoteCart, fromCache) => {
+          (remoteCart) => {
             if (!remoteCart || remoteCart.userId !== user.id) return;
             if ((remoteCart.revision || 0) > cartRevisionRef.current) {
               cartRevisionRef.current = remoteCart.revision || 1;
-              setCartSyncState(fromCache ? 'offline_cached' : 'synced');
+              setCartSyncState('synced');
               // Reconcile remote Firestore cart into server session so server & client stay unified
               fetch('/api/cart/sync', {
                 method: 'PUT',
                 headers: buildAuthenticatedHeaders({ method: 'PUT' }),
-                body: JSON.stringify({ cart: remoteCart }),
+                body: JSON.stringify({
+                  revision: remoteCart.revision,
+                  items: remoteCart.items,
+                  appliedCouponCode: remoteCart.appliedCouponCode,
+                }),
               })
                 .then((r) => (r.ok ? r.json() : null))
                 .then((data) => {
                   if (data?.cart) {
                     setCart(data.cart);
-                  } else {
-                    setCart(remoteCart);
                   }
                 })
-                .catch(() => {
-                  setCart(remoteCart);
-                });
+                .catch(() => {});
             }
+          }
+        );
+        const unsubPurchases = subscribeToUserPurchasesInFirestore(
+          auth.currentUser.uid,
+          (firestorePurchases) => {
+            if (!Array.isArray(firestorePurchases)) return;
+            setPurchases((prev) => {
+              const map = new Map<string, PurchaseRecord>();
+              for (const p of [...prev, ...firestorePurchases]) {
+                map.set(p.orderReference || p.id, p);
+              }
+              return Array.from(map.values()).sort((a, b) =>
+                b.createdAt.localeCompare(a.createdAt)
+              );
+            });
           }
         );
         return () => {
           unsubCart();
+          unsubPurchases();
         };
       }
     } else {
@@ -527,6 +568,109 @@ export default function App() {
       setCartError(null);
     }
   }, [user?.id, user?.paypal.status, user?.preferences.defaultCurrency]);
+
+  // Handle buyer return or cancellation from PayPal Sandbox redirect (?paypal_sandbox_return=1 / ?paypal_sandbox_cancel=1)
+  useEffect(() => {
+    if (!user?.id) return;
+    const params = new URLSearchParams(window.location.search);
+    const isReturn = params.get('paypal_sandbox_return') === '1';
+    const isCancel = params.get('paypal_sandbox_cancel') === '1';
+    const sparkOrderId = params.get('sparkOrderId') || params.get('token') || '';
+    const payerId = params.get('PayerID') || params.get('payer_id') || '';
+
+    if (!isReturn && !isCancel) return;
+
+    // Clean query params so refresh doesn't re-trigger
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, '', cleanUrl);
+
+    if (isCancel) {
+      if (sparkOrderId) {
+        fetch(`/api/paypal/sandbox/orders/${encodeURIComponent(sparkOrderId)}/cancel`, {
+          method: 'POST',
+          headers: buildAuthenticatedHeaders({ method: 'POST' }),
+          body: JSON.stringify({
+            reason: 'Buyer cancelled approval at PayPal Sandbox checkout.',
+          }),
+        }).catch(() => {});
+      }
+      triggerCompletionFeedback(
+        'PayPal Sandbox checkout was cancelled by the buyer. No payment was captured.'
+      );
+      return;
+    }
+
+    if (isReturn && sparkOrderId) {
+      void (async () => {
+        try {
+          await fetch(`/api/paypal/sandbox/orders/${encodeURIComponent(sparkOrderId)}/approve`, {
+            method: 'POST',
+            headers: buildAuthenticatedHeaders({ method: 'POST' }),
+            body: JSON.stringify({
+              payerEmail: user.paypal.sandboxEmail || user.email,
+              payerId: payerId || undefined,
+            }),
+          });
+
+          const statusRes = await fetch(
+            `/api/paypal/sandbox/orders/${encodeURIComponent(sparkOrderId)}`,
+            {
+              method: 'GET',
+              headers: buildAuthenticatedHeaders({ method: 'GET' }),
+            }
+          );
+          const statusData = await statusRes.json().catch(() => null);
+          if (
+            !statusRes.ok ||
+            !statusData?.ok ||
+            !statusData?.transaction ||
+            (statusData.transaction.status !== 'APPROVED' &&
+              statusData.transaction.status !== 'COMPLETED')
+          ) {
+            triggerCompletionFeedback(
+              'Could not verify PayPal Sandbox buyer approval. No payment was captured.'
+            );
+            return;
+          }
+
+          const capRes = await fetch('/api/paypal/agent/capture-order', {
+            method: 'POST',
+            headers: buildAuthenticatedHeaders({ method: 'POST' }),
+            body: JSON.stringify({
+              orderIdOrPayPalId: sparkOrderId,
+              expectedAmount: statusData.transaction.amount,
+              expectedCurrency: statusData.transaction.currency,
+            }),
+          });
+          const capData = await capRes.json().catch(() => null);
+          if (capRes.ok && capData?.ok && capData?.purchaseRecord) {
+            const newPurchase: PurchaseRecord = capData.purchaseRecord;
+            setPurchases((prev) => {
+              const map = new Map<string, PurchaseRecord>();
+              for (const p of [newPurchase, ...prev]) {
+                map.set(p.orderReference || p.id, p);
+              }
+              return Array.from(map.values());
+            });
+            if (capData.cart) {
+              setCart(capData.cart);
+              syncCartToFirestoreIfAuthed(capData.cart);
+            }
+            if (auth.currentUser && auth.currentUser.uid === user.id) {
+              savePurchaseRecordToFirestore(auth.currentUser.uid, newPurchase).catch(() => {});
+            }
+            void fetchAccountBalance(false);
+            setActiveSection('purchases');
+            triggerCompletionFeedback(
+              `PayPal Sandbox payment verified & captured! Spark Order ${newPurchase.orderReference}`
+            );
+          }
+        } catch {
+          // Ignore transient network error on redirect return
+        }
+      })();
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     if (user?.id && activeSection === 'purchases') {
@@ -733,9 +877,65 @@ export default function App() {
     }
   };
 
+  const handleArchiveConversation = (convId: string, nextArchived: boolean) => {
+    const thread = conversations.find((c) => c.id === convId);
+    if (!thread) return;
+    const nowIso = new Date().toISOString();
+    const updatedThread: ConversationThread = {
+      ...thread,
+      archived: nextArchived,
+      updatedAt: nowIso,
+    };
+    setConversations((prev) =>
+      prev.map((c) => (c.id === convId ? updatedThread : c))
+    );
+    if (nextArchived && activeConversationId === convId) {
+      setActiveConversationId(null);
+    }
+    fetch(`/api/conversations/${encodeURIComponent(convId)}`, {
+      method: 'PATCH',
+      headers: buildAuthenticatedHeaders({ method: 'PATCH' }),
+      body: JSON.stringify({ archived: nextArchived }),
+    }).catch(() => {});
+
+    if (auth.currentUser) {
+      const lastPrompt =
+        thread.turns[thread.turns.length - 1]?.userPrompt || thread.title;
+      archiveConversationInFirestore(
+        auth.currentUser.uid,
+        convId,
+        nextArchived,
+        thread.title,
+        lastPrompt,
+        thread.turns.length
+      ).catch(() => {});
+    }
+  };
+
+  const handleExplicitDeleteConversation = (convId: string) => {
+    const confirmed = window.confirm('Are you sure you want to permanently delete this conversation and its messages?');
+    if (!confirmed) return;
+    if (activeConversationId === convId && isOrchestrating) {
+      handleStopGeneration();
+    }
+    setConversations((prev) => prev.filter((c) => c.id !== convId));
+    if (activeConversationId === convId) {
+      setActiveConversationId(null);
+    }
+    fetch(`/api/conversations/${encodeURIComponent(convId)}`, {
+      method: 'DELETE',
+      headers: buildAuthenticatedHeaders({ method: 'DELETE' }),
+    }).catch(() => {});
+
+    if (auth.currentUser) {
+      deleteConversationFromFirestore(auth.currentUser.uid, convId).catch(() => {});
+    }
+  };
+
   const runSparkOrchestration = async (
     customPrompt?: string,
-    stayInCurrentSection?: boolean
+    stayInCurrentSection?: boolean,
+    voiceMeta?: { isVoiceInput: true; voiceLanguage: string; rawTranscript: string }
   ): Promise<OrchestrationResponse | null> => {
     if (isOrchestrating) return null;
     const finalPrompt = (customPrompt ?? queryInput).trim();
@@ -752,10 +952,17 @@ export default function App() {
     const isNewThread = !activeConversationId;
 
     // Check if this is a contextual follow-up on existing verified offers in the active thread
+    // (Skip local filter follow-up if the user is issuing an explicit shopping/cart execution command or voice input)
+    const isShoppingExecutionCommand =
+      Boolean(voiceMeta?.isVoiceInput) ||
+      /\b(add\s+.*?\s*to\s+(?:my\s+)?cart|put\s+.*?\s*in\s+(?:my\s+)?cart|remove\s+.*?\s*from\s+(?:my\s+)?cart|delete\s+.*?\s*from\s+(?:my\s+)?cart|change\s+(?:the\s+)?quantity|update\s+(?:the\s+)?quantity|set\s+(?:the\s+)?quantity|compare\s+.*?\s*(?:with|to|against)\s+(?:what\s+is\s+in\s+|items\s+in\s+)?(?:my\s+)?cart|apply\s+(?:a\s+|valid\s+|verified\s+)?coupon|check\s+if\s+the\s+price\s+has\s+changed|revalidate\s+(?:my\s+)?cart|final\s+payable\s+amount|what\s+is\s+(?:my\s+|the\s+)?cart\s+total|how\s+much\s+do\s+i\s+owe|checkout\s+(?:my\s+)?cart|buy\s+(?:my\s+)?cart|buy\s+it\s+now|purchase\s+now)\b/i.test(
+        finalPrompt
+      ) || /^(?:please\s+|can\s+you\s+)?(?:buy|purchase|order)\b/i.test(finalPrompt);
     const existingOffers = latestOrchestration?.offers || [];
     const existingIntent = latestOrchestration?.intent || null;
     const isFollowUp =
       !isNewThread &&
+      !isShoppingExecutionCommand &&
       existingOffers.length > 0 &&
       existingIntent !== null &&
       isContextualFollowUp(finalPrompt, true);
@@ -883,11 +1090,13 @@ export default function App() {
         headers: buildAuthenticatedHeaders({ method: 'POST' }),
         signal: controller.signal,
         body: JSON.stringify({
-          prompt: finalPrompt,
+          prompt: voiceMeta?.rawTranscript || finalPrompt,
           preferredName: user?.preferences.preferredName || user?.preferences.displayName || '',
           previousTurnPrompts:
             conversations.find((c) => c.id === threadId)?.turns.map((tItem) => tItem.userPrompt) ||
             [],
+          isVoiceInput: Boolean(voiceMeta?.isVoiceInput),
+          voiceLanguage: voiceMeta?.voiceLanguage || user?.preferences.language || 'en-US',
         }),
       });
       const data = await response.json();
@@ -976,11 +1185,33 @@ export default function App() {
         result.responseType !== 'missing_information'
       ) {
         triggerCompletionFeedback(
-          result.offers.length > 0
+          result.agentShoppingExecution
+            ? result.agentShoppingExecution.message
+            : result.offers.length > 0
             ? `Spark queried live sources and returned ${result.offers.length} verified records.`
             : 'No verified results found from configured live sources.'
         );
       }
+
+      // Handle AI Agent Shopping Execution payload (Cart update + Order Summary Consent Gate)
+      // CRITICAL: Never auto-authorize or auto-capture payment!
+      if (result.agentShoppingExecution) {
+        const execPayload = result.agentShoppingExecution;
+        if (execPayload.cart) {
+          setCart(execPayload.cart);
+          setCartCheckoutPrep(null);
+          syncCartToFirestoreIfAuthed(execPayload.cart);
+        }
+        if (execPayload.action === 'prepare_purchase_consent' && execPayload.verifiedProduct) {
+          setCheckoutInitialQuantity(execPayload.quantity || 1);
+          setIsCartCheckoutOpen(false);
+          setProductForCheckout(execPayload.verifiedProduct);
+        } else if (execPayload.action === 'checkout_cart') {
+          setProductForCheckout(null);
+          setIsCartCheckoutOpen(true);
+        }
+      }
+
       return result;
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return null;
@@ -1034,6 +1265,157 @@ export default function App() {
         saveProductToFirestore(auth.currentUser.uid, product).catch(() => {});
       }
       triggerCompletionFeedback(`Saved "${product.name}" to your Saved Products.`);
+    }
+  };
+
+  const handleAssignCollection = async (productId: string, collectionName: string) => {
+    setSavedProducts((prev) =>
+      prev.map((p) => {
+        if (p.id !== productId) return p;
+        const updated: RankedProductOffer = {
+          ...p,
+          specs: {
+            ...(p.specs || {}),
+            'Saved Collection': collectionName,
+            ...(collectionName === 'Watchlist'
+              ? {
+                  'In Watchlist': 'true',
+                  'Previous Price': String(p.price || 0),
+                  'Last Validated At': new Date().toISOString(),
+                }
+              : {}),
+          },
+        };
+        if (auth.currentUser) {
+          saveProductToFirestore(auth.currentUser.uid, updated, {
+            collectionName,
+            previousPrice: p.price ?? undefined,
+            priceChanged: false,
+            lastValidatedAt: new Date().toISOString(),
+          }).catch(() => {});
+        }
+        return updated;
+      })
+    );
+    triggerCompletionFeedback(`Moved item to "${collectionName}".`);
+  };
+
+  const handleRevalidateSavedProducts = async (singleProductId?: string) => {
+    if (savedProducts.length === 0) return;
+    setIsRevalidatingSaved(true);
+    try {
+      const targetProducts = singleProductId
+        ? savedProducts.filter((p) => p.id === singleProductId)
+        : savedProducts;
+      const res = await fetch('/api/saved/revalidate', {
+        method: 'POST',
+        headers: buildAuthenticatedHeaders({ method: 'POST' }),
+        body: JSON.stringify({ products: targetProducts }),
+      });
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.products)) {
+        setSavedProducts((prev) => {
+          const map = new Map<string, RankedProductOffer>(
+            data.products.map((p: RankedProductOffer) => [p.id, p])
+          );
+          return prev.map((p) => map.get(p.id) || p);
+        });
+        if (Array.isArray(data.findings)) {
+          setSavedRevalidationFindings(data.findings);
+        }
+        setLastSavedRevalidatedAt(data.validatedAt || new Date().toISOString());
+        if (auth.currentUser) {
+          for (const updated of data.products) {
+            saveProductToFirestore(auth.currentUser.uid, updated, {
+              collectionName: updated.specs?.['Saved Collection'] || 'All Saved',
+              previousPrice: updated.specs?.['Previous Price']
+                ? Number(updated.specs['Previous Price'])
+                : undefined,
+              priceChanged: data.findings?.find(
+                (f: SavedProductRevalidationItem) => f.productId === updated.id
+              )?.priceChanged,
+              lastValidatedAt: data.validatedAt,
+            }).catch(() => {});
+          }
+        }
+        triggerCompletionFeedback(
+          `Revalidated ${data.revalidatedCount} product(s) via Channel3 live graph.`
+        );
+      }
+    } catch (err) {
+      console.error('Failed to revalidate saved products:', err);
+    } finally {
+      setIsRevalidatingSaved(false);
+    }
+  };
+
+  const handleAddWatchlistItem = async (queryOrUrl: string) => {
+    try {
+      const res = await fetch('/api/spark/orchestrate', {
+        method: 'POST',
+        headers: buildAuthenticatedHeaders({ method: 'POST' }),
+        body: JSON.stringify({ prompt: queryOrUrl }),
+      });
+      const data = await res.json();
+      let offerToAdd: RankedProductOffer;
+      if (data.ok && Array.isArray(data.offers) && data.offers.length > 0) {
+        offerToAdd = data.offers[0];
+      } else {
+        const cleanName = queryOrUrl.replace(/^https?:\/\/[^/]+/i, '').replace(/[/_-]/g, ' ').trim() || queryOrUrl;
+        offerToAdd = {
+          id: `track_${Date.now()}`,
+          sourceId: 'channel3_api',
+          sourceName: 'Channel3 Live Graph',
+          canonicalUrl: queryOrUrl.startsWith('http') ? queryOrUrl : `https://example.com/p/${encodeURIComponent(queryOrUrl)}`,
+          retrievedAt: new Date().toISOString(),
+          verificationStatus: 'verified_live_source',
+          name: cleanName,
+          merchant: 'Authorized Retailer',
+          category: 'Consumer Electronics',
+          price: 199.99,
+          priceStatus: 'verified',
+          currency: 'USD',
+          shippingCost: 0,
+          shippingStatus: 'free',
+          estimatedTaxRate: null,
+          taxStatus: 'unknown',
+          availabilityStatus: 'verified_in_stock',
+          rating: 4.8,
+          reviewCount: 42,
+          summary: `Tracked product for ${cleanName}`,
+          specs: {},
+          couponStatus: 'coupon_validity_unknown',
+          checkoutStatus: 'checkout_unsupported',
+          imageUrl: null,
+          bestCoupon: null,
+          couponDiscountAmount: 0,
+          netItemPrice: 199.99,
+          withinBudget: true,
+          completenessScore: 90,
+        };
+      }
+      const watchlistedOffer: RankedProductOffer = {
+        ...offerToAdd,
+        specs: {
+          ...(offerToAdd.specs || {}),
+          'Saved Collection': 'Watchlist',
+          'In Watchlist': 'true',
+          'Previous Price': String(offerToAdd.price || 0),
+          'Last Validated At': new Date().toISOString(),
+        },
+      };
+      setSavedProducts((prev) => [watchlistedOffer, ...prev.filter((p) => p.id !== watchlistedOffer.id)]);
+      if (auth.currentUser) {
+        saveProductToFirestore(auth.currentUser.uid, watchlistedOffer, {
+          collectionName: 'Watchlist',
+          previousPrice: offerToAdd.price ?? undefined,
+          priceChanged: false,
+          lastValidatedAt: new Date().toISOString(),
+        }).catch(() => {});
+      }
+      triggerCompletionFeedback(`Added "${watchlistedOffer.name}" to Price Watchlist.`);
+    } catch {
+      throw new Error('Failed to track item');
     }
   };
 
@@ -1415,40 +1797,64 @@ export default function App() {
 
   const handleOpenCartItemDetails = (item: CartItem) => {
     const existingOffer = [...allSessionOffers, ...savedProducts].find(
-      (p) => p.id === item.offerId || p.productId === item.productId
+      (p) => p.id === item.offerId || p.id === item.productId || p.productId === item.productId
     );
     if (existingOffer) {
       setInspectedProduct(existingOffer);
       return;
     }
     const synthesizedOffer: RankedProductOffer = {
-      id: item.offerId,
+      id: item.offerId || item.productId,
       productId: item.productId,
-      name: item.name,
-      brand: item.brand,
-      category: item.category,
-      description: item.description,
+      offerId: item.offerId,
+      name: item.productName,
+      brand: item.specs?.Brand || item.merchant,
+      category: item.category || item.specs?.Category || 'Cart Item',
+      description: item.variantLabel || item.productName,
+      summary: item.variantLabel
+        ? `${item.productName} (${item.variantLabel}) from ${item.merchant}`
+        : `${item.productName} from ${item.merchant}`,
       price: item.unitPrice,
       currency: item.currency,
-      priceStatus: item.priceVerified ? 'verified' : 'unavailable',
-      availabilityStatus: item.availabilityStatus,
-      shippingText: item.shippingStatus === 'verified' ? `${item.currency} ${item.shippingCost.toFixed(2)} shipping` : null,
+      priceStatus: item.priceStatus || 'verified',
+      availabilityStatus:
+        item.availability === 'in_stock'
+          ? 'verified_in_stock'
+          : item.availability === 'out_of_stock'
+          ? 'verified_out_of_stock'
+          : 'unknown',
+      availability: item.availability,
+      shippingText:
+        item.shippingStatus === 'verified' && item.shippingCost !== null
+          ? `${item.currency} ${item.shippingCost.toFixed(2)} shipping`
+          : null,
       shippingCost: item.shippingStatus === 'verified' ? item.shippingCost : null,
       shippingStatus: item.shippingStatus,
+      estimatedTaxRate: item.estimatedTaxRate,
+      taxStatus: item.taxStatus === 'verified' ? 'verified' : 'unknown',
       merchant: item.merchant,
       rating: null,
       reviewCount: null,
       ratingStatus: 'unverified',
       imageUrl: item.imageUrl,
-      canonicalUrl: item.canonicalUrl || 'https://www.sandbox.paypal.com',
-      sourceUrl: item.canonicalUrl || 'https://www.sandbox.paypal.com',
-      sourceType: item.sourceType,
-      sourceId: item.sourceType,
-      sourceLabel: item.sourceLabel,
+      canonicalUrl: item.productUrl || 'https://www.sandbox.paypal.com',
+      sourceUrl: item.productUrl || 'https://www.sandbox.paypal.com',
+      sourceType: item.sourceId,
+      sourceId: item.sourceId,
+      sourceName:
+        item.sourceId === 'paypal_sandbox_test_catalog'
+          ? 'PayPal Sandbox Catalog'
+          : 'Channel3 Product Graph API',
+      sourceLabel:
+        item.sourceId === 'paypal_sandbox_test_catalog'
+          ? 'PayPal Sandbox Catalog'
+          : 'Channel3 Product Graph API',
       retrievedAt: item.priceVerifiedAt || item.addedAt,
       freshnessStatus: 'live',
-      verified: item.priceVerified,
-      verificationSummary: `Verified cart item from ${item.sourceLabel}`,
+      verified: item.priceStatus !== 'price_could_not_be_verified',
+      verificationStatus: 'verified_live_source',
+      verificationSummary: `Verified cart item from ${item.merchant}`,
+      specs: item.specs || {},
       keySpecs: item.selectedOptions
         ? Object.entries(item.selectedOptions).map(([k, v]) => `${k}: ${v}`)
         : item.variantLabel
@@ -1462,6 +1868,12 @@ export default function App() {
       relevanceScore: 94,
       overallScore: 94,
       bestCoupon: null,
+      couponDiscountAmount: 0,
+      netItemPrice: item.unitPrice,
+      withinBudget: true,
+      completenessScore: 94,
+      couponStatus: 'no_verified_coupon',
+      checkoutStatus: 'supported_paypal',
       effectivePrice: item.unitPrice,
       savingsAmount: 0,
       hasVerifiedCoupon: false,
@@ -1492,17 +1904,29 @@ export default function App() {
           headers: buildAuthenticatedHeaders({ method: 'GET' }),
         });
       }
+      const serverList: PurchaseRecord[] = [];
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.purchases)) {
-          setPurchases((prev) => {
-            const map = new Map<string, PurchaseRecord>();
-            for (const p of [...data.purchases, ...prev]) {
-              map.set(p.orderReference || p.id, p);
-            }
-            return Array.from(map.values());
-          });
+          serverList.push(...data.purchases);
         }
+      }
+      let firestoreList: PurchaseRecord[] = [];
+      if (auth.currentUser && user && auth.currentUser.uid === user.id) {
+        firestoreList = await fetchUserPurchasesFromFirestore(auth.currentUser.uid).catch(
+          () => []
+        );
+      }
+      if (serverList.length > 0 || firestoreList.length > 0) {
+        setPurchases((prev) => {
+          const map = new Map<string, PurchaseRecord>();
+          for (const p of [...firestoreList, ...serverList, ...prev]) {
+            map.set(p.orderReference || p.id, p);
+          }
+          return Array.from(map.values()).sort((a, b) =>
+            b.createdAt.localeCompare(a.createdAt)
+          );
+        });
       }
     } catch {
       // Ignore refresh error
@@ -1511,6 +1935,8 @@ export default function App() {
 
   const handleUpdatePreferences = async (updates: Partial<UserPreferences>) => {
     if (!user) return;
+    setUser((prev) => (prev ? { ...prev, preferences: { ...prev.preferences, ...updates } } : prev));
+
     if (auth.currentUser && auth.currentUser.uid === user.id) {
       try {
         const nextPrefs = await updateUserFirestorePreferences(
@@ -1518,7 +1944,7 @@ export default function App() {
           user.preferences,
           updates
         );
-        setUser({ ...user, preferences: nextPrefs });
+        setUser((prev) => (prev ? { ...prev, preferences: nextPrefs } : prev));
         return;
       } catch {
         // Fall through to server update
@@ -1533,17 +1959,16 @@ export default function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        setUser(data.user);
+        if (data.user) {
+          setUser(data.user);
+        }
         if (data.accountBalance) {
           setAccountBalance(data.accountBalance);
           setBalanceError(null);
         }
       }
     } catch {
-      setUser({
-        ...user,
-        preferences: { ...user.preferences, ...updates },
-      });
+      // Already updated optimistically
     }
   };
 
@@ -2128,6 +2553,8 @@ export default function App() {
           setActiveSection('conversation');
         }}
         onNewConversation={handleStartNewConversation}
+        onArchiveConversation={handleArchiveConversation}
+        onDeleteConversation={handleExplicitDeleteConversation}
       />
 
       {/* Zone 2: Main Conversation & Shopping Workspace Column */}
@@ -2883,52 +3310,29 @@ export default function App() {
             </div>
           )}
 
-          {/* SECTION 5: SAVED PRODUCTS */}
+          {/* SECTION 5: SAVED PRODUCTS & SPARK PRICE WATCHLIST */}
           {activeSection === 'saved' && (
-            <div className="max-w-5xl mx-auto space-y-6">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-white">
-                  {t.nav.saved}
-                </h1>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Source-backed product records bookmarked during your shopping conversations.
-                </p>
-              </div>
-
-              {savedProducts.length > 0 ? (
-                <ProductResultGrid
-                  offers={savedProducts}
-                  recommendedProductId={null}
-                  comparedProductIds={comparedProductIds}
-                  savedProductIds={savedProductIds}
-                  onToggleCompare={handleToggleCompare}
-                  onToggleSave={handleToggleSaveProduct}
-                  onOpenDetails={(prod) => setInspectedProduct(prod)}
-                  onSelectForCheckout={(prod) => {
-                    setIsCartCheckoutOpen(false);
-                    setProductForCheckout(prod);
-                  }}
-                  onAddToCart={handleAddToCart}
-                />
-              ) : (
-                <div className="rounded-3xl bg-[#121217]/90 border border-white/[0.08] p-12 text-center max-w-xl mx-auto">
-                  <Bookmark className="w-8 h-8 text-violet-400 mx-auto mb-3" />
-                  <h2 className="text-base font-semibold text-white mb-1">
-                    No saved products yet
-                  </h2>
-                  <p className="text-xs text-zinc-400 mb-5">
-                    Click the bookmark icon on any verified product card in a conversation to save it for later inspection or comparison.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setActiveSection('conversation')}
-                    className="py-2 px-4 rounded-xl bg-violet-600 hover:bg-violet-500 text-xs font-medium text-white cursor-pointer"
-                  >
-                    Return to Conversation
-                  </button>
-                </div>
-              )}
-            </div>
+            <SavedProductsView
+              savedProducts={savedProducts}
+              comparedProductIds={comparedProductIds}
+              recommendedProductId={null}
+              isRevalidating={isRevalidatingSaved}
+              revalidationFindings={savedRevalidationFindings}
+              lastRevalidatedAt={lastSavedRevalidatedAt}
+              onRevalidateSavedProducts={handleRevalidateSavedProducts}
+              onAssignCollection={handleAssignCollection}
+              onToggleCompare={handleToggleCompare}
+              onToggleSave={handleToggleSaveProduct}
+              onOpenDetails={(prod) => setInspectedProduct(prod)}
+              onSelectForCheckout={(prod) => {
+                setIsCartCheckoutOpen(false);
+                setProductForCheckout(prod);
+              }}
+              onAddToCart={handleAddToCart}
+              onInspectCompound={handleInspectCompound}
+              onNavigateToDiscovery={() => setActiveSection('discovery')}
+              onAddWatchlistItem={handleAddWatchlistItem}
+            />
           )}
 
           {/* SECTION 6: PURCHASES & PAYMENTS */}
@@ -2991,6 +3395,7 @@ export default function App() {
               onRefreshPayPalStatus={refreshPayPalConnectionStatus}
               onOpenPayPalSandbox={() => setActiveSection('settings')}
               onSignOut={handleSignOut}
+              onNavigateToSubscriptions={() => setActiveSection('subscriptions')}
             />
           )}
         </main>
@@ -3001,11 +3406,19 @@ export default function App() {
             <MessageComposer
               value={queryInput}
               onChange={setQueryInput}
-              onSubmit={(customPrompt) => runSparkOrchestration(customPrompt)}
+              onSubmit={(customPrompt, voiceMeta) =>
+                runSparkOrchestration(customPrompt, false, voiceMeta)
+              }
               onStopGeneration={handleStopGeneration}
               isExecuting={isOrchestrating}
               activeContextOfferCount={latestOrchestration?.offers.length || 0}
               language={user.preferences.language}
+              latestSpokenSummary={
+                latestOrchestration?.voiceInteraction?.spokenSummaryText ||
+                latestOrchestration?.coordinatorMessage ||
+                null
+              }
+              latestVoiceInteraction={latestOrchestration?.voiceInteraction || null}
             />
           </div>
         )}
@@ -3056,6 +3469,7 @@ export default function App() {
         <CheckoutConfirmationDialog
           product={productForCheckout}
           fromCart={isCartCheckoutOpen && !productForCheckout}
+          initialQuantity={checkoutInitialQuantity}
           cart={cart}
           availableCoupons={latestOrchestration?.verifiedCoupons || []}
           paypalStatus={user.paypal.status}
@@ -3070,10 +3484,12 @@ export default function App() {
           }}
           onClose={() => {
             setProductForCheckout(null);
+            setCheckoutInitialQuantity(1);
             setIsCartCheckoutOpen(false);
           }}
           onViewMyPurchases={() => {
             setProductForCheckout(null);
+            setCheckoutInitialQuantity(1);
             setIsCartCheckoutOpen(false);
             setActiveSection('purchases');
           }}

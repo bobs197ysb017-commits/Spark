@@ -1,0 +1,996 @@
+# SPARK — PHASE 5: FINAL AI AGENT INTELLIGENCE REFINEMENT
+## Seven-Agent Orchestration · Omega Decision Crucible · Autonomous Shopping · Voice Mode · Advanced Research · Evidence-Based Intelligence
+
+You are executing Phase 5 of Spark — Global Product Intelligence.
+
+Your mission is to transform Spark's existing AI agent into a highly coordinated, accurate, fast, context-aware, and transaction-capable intelligence system.
+
+This phase focuses on the intelligence layer, agent orchestration, decision quality, shopping execution, voice interaction, research efficiency, and factual reliability.
+
+This is an implementation task. Inspect the existing system, identify weaknesses, implement improvements, execute tests, and provide verifiable evidence.
+
+Do not simply rewrite prompts or create a new agent architecture. Improve the existing seven specialist agents, orchestrator, and Omega Decision Crucible while preserving working functionality.
+
+---
+
+# 1. NON-NEGOTIABLE ARCHITECTURAL REQUIREMENTS
+
+Preserve:
+
+- The existing seven specialist agents.
+- The central agent orchestrator.
+- Omega Decision Crucible.
+- Gemini and Claude integrations.
+- Channel3 as the exclusive product data source.
+- Firebase Authentication and Firestore.
+- The existing Cart and Purchases systems.
+- PayPal Sandbox transaction safeguards.
+- Existing conversation context and memory architecture.
+
+Strict restrictions:
+
+- No Elastic or Elasticsearch.
+- No alternative product catalog provider.
+- No fabricated product information, specifications, prices, ratings, coupons, merchants, or availability.
+- No unauthorized purchase execution.
+- No PayPal capture before verified buyer approval.
+- No duplicate payment operations.
+- No hardcoded responses pretending to be real model outputs.
+- No removal of working functionality merely to simplify implementation.
+
+Inspect the actual codebase before deciding what to change.
+
+# 2. SEVEN-AGENT ORCHESTRATION ENGINE
+
+Develop a coordinated multi-agent execution architecture.
+
+The seven existing specialists must operate as one intelligent research system rather than seven independent chatbots.
+
+### Agent 1 — Intent & Requirements Intelligence
+
+Responsibilities:
+
+- Understand the user's actual objective.
+- Extract explicit and implicit requirements.
+- Identify mandatory and optional constraints.
+- Understand budget, currency, category, intended use, and priorities.
+- Resolve ambiguous requirements.
+- Preserve constraints across multiple conversation turns.
+- Detect conflicting or impossible requirements.
+- Ask only essential clarification questions.
+
+Improve structured intent representation.
+
+Suggested output:
+
+- User objective.
+- Product category.
+- Mandatory requirements.
+- Preferred requirements.
+- Excluded features.
+- Budget and currency.
+- Intended usage.
+- Confidence.
+- Missing information.
+- Clarification requirements.
+
+### Agent 2 — Global Product Discovery
+
+Responsibilities:
+
+- Search exclusively through Channel3.
+- Translate structured requirements into effective product queries.
+- Discover relevant candidates.
+- Perform category-aware searches.
+- Expand searches when results are insufficient.
+- Remove duplicate products.
+- Preserve product identifiers and source references.
+- Return actual source-backed results.
+
+Improve search coverage without generating unnecessary requests.
+
+### Agent 3 — Product Identity & Catalog Intelligence
+
+Responsibilities:
+
+- Verify product identity.
+- Resolve naming variations.
+- Match SKUs and product identifiers.
+- Identify model generations and variants.
+- Detect incorrect product matches.
+- Normalize product information.
+- Detect duplicate or conflicting catalog records.
+
+Never merge products merely because their names are similar.
+
+### Agent 4 — Technical Product Research
+
+Responsibilities:
+
+- Analyze specifications.
+- Evaluate technical suitability.
+- Compare products against mandatory requirements.
+- Identify missing technical information.
+- Detect specification inconsistencies.
+- Separate source-provided specifications from inference.
+
+Do not generate specifications that are absent from reliable evidence.
+
+### Agent 5 — Quality & Reputation Intelligence
+
+Responsibilities:
+
+- Assess available quality evidence.
+- Evaluate merchant and product reputation using supported source information.
+- Identify weak or missing evidence.
+- Distinguish customer claims from verified facts.
+- Detect suspicious inconsistencies.
+- Explain uncertainty.
+
+Do not invent ratings, review counts, certifications, or quality claims.
+
+### Agent 6 — Pricing & Value Intelligence
+
+Responsibilities:
+
+- Verify prices and currencies from Channel3.
+- Identify pricing differences.
+- Evaluate value relative to the user's requirements.
+- Calculate comparable totals only when all required data is available.
+- Identify unknown shipping, tax, and fees.
+- Detect stale pricing.
+- Avoid automatically selecting the cheapest product.
+
+Never invent discounts or claim an unverified price is current.
+
+### Agent 7 — Independent Verification & Decision Intelligence
+
+Responsibilities:
+
+- Independently challenge the evidence gathered by other agents.
+- Identify contradictions.
+- Detect missing mandatory requirements.
+- Check whether conclusions follow from evidence.
+- Identify unsupported claims.
+- Determine whether a recommendation is sufficiently supported.
+- Produce an explicit verification result.
+
+This agent must have the ability to reject unsupported conclusions rather than simply agreeing with the other agents.
+
+---
+
+# 3. CENTRAL ORCHESTRATOR — COORDINATION AND EXECUTION
+
+Develop the central orchestrator into a reliable workflow controller.
+
+### Execution capabilities
+
+- Assign tasks to the appropriate specialist.
+- Execute independent research tasks in parallel when safe.
+- Enforce dependencies between research stages.
+- Maintain a shared structured research context.
+- Avoid redundant agent calls.
+- Track agent execution status.
+- Detect failed or incomplete agent outputs.
+- Retry transient failures safely.
+- Stop unnecessary research when sufficient evidence exists.
+- Request additional research when important evidence is missing.
+
+### Structured agent contracts
+
+Each agent must return structured, validated output containing:
+
+- Agent identity.
+- Task identifier.
+- Findings.
+- Supporting evidence.
+- Source references.
+- Confidence.
+- Unknown fields.
+- Contradictions.
+- Completion status.
+- Recommended next action.
+
+Reject malformed or incomplete outputs.
+
+Do not allow one agent to silently overwrite another agent's findings.
+
+### Coordination rules
+
+- Intent must be established before complex research begins.
+- Product discovery must precede detailed product evaluation.
+- Product identity must be established before comparing specifications.
+- Pricing analysis must use verified product identity.
+- Independent verification must challenge the final evidence.
+- Omega must receive the complete relevant research context.
+
+Avoid running every agent for every request. Use task-based orchestration.
+
+---
+
+# 4. OMEGA DECISION CRUCIBLE — ADVANCED DECISION ENGINE
+
+Develop Omega into Spark's central evidence-based decision system.
+
+Omega must not merely summarize the other agents. It must independently evaluate whether their conclusions are logically and factually supported.
+
+### A. Evidence aggregation
+
+Collect:
+
+- User requirements.
+- Product identity.
+- Technical specifications.
+- Pricing evidence.
+- Merchant evidence.
+- Quality evidence.
+- Availability.
+- Missing information.
+- Contradictions.
+- Agent confidence.
+- Source references.
+
+Preserve evidence provenance from the original source.
+
+### B. Evidence classification
+
+Every important claim must use an explicit classification:
+
+- VERIFIED_FACT
+- SOURCE_CLAIM
+- INFERENCE
+- UNKNOWN
+- CONFLICTING_EVIDENCE
+
+Each classification must have clear rules.
+
+Examples:
+
+A product specification explicitly present in a reliable source is a source-backed fact.
+
+A merchant's own promotional statement remains a source claim unless independently verified.
+
+A derived technical conclusion is an inference.
+
+An unavailable shipping cost remains unknown.
+
+Two contradictory source values must be represented as conflicting evidence.
+
+Never convert UNKNOWN into a plausible-looking value.
+
+### C. Mandatory requirement validation
+
+Before recommending a product:
+
+1. Identify mandatory user requirements.
+2. Match each requirement against available evidence.
+3. Mark each requirement as satisfied, failed, or unknown.
+4. Reject products that fail mandatory requirements.
+5. Do not treat unknown mandatory requirements as confirmed.
+6. Explain unresolved requirements.
+
+### D. Decision evaluation
+
+Improve the existing nine-dimension evaluation system without discarding its established dimensions or historical compatibility.
+
+Use category-aware evaluation.
+
+Do not apply identical technical criteria to unrelated categories.
+
+Avoid arbitrary scoring and unsupported precision.
+
+Every important score must have an explainable basis.
+
+### E. Pareto and trade-off analysis
+
+Implement or improve:
+
+- Pareto dominance analysis.
+- Trade-off identification.
+- Value-for-money analysis.
+- Mandatory requirement filtering.
+- Evidence quality assessment.
+- Uncertainty analysis.
+
+Do not automatically choose the cheapest product.
+
+A more expensive product may be preferable when it better satisfies the user's actual requirements.
+
+### F. Decision confidence
+
+Produce a transparent decision confidence assessment.
+
+Confidence must reflect:
+
+- Evidence coverage.
+- Source quality.
+- Agreement between independent agents.
+- Missing mandatory information.
+- Contradictory evidence.
+- Freshness of pricing and availability.
+
+Do not calculate confidence from agent agreement alone.
+
+### G. Omega verdict
+
+Possible outcomes:
+
+- STRONG_RECOMMENDATION
+- RECOMMENDATION_WITH_CAVEATS
+- INSUFFICIENT_EVIDENCE
+- REQUIREMENTS_NOT_SATISFIED
+- CONFLICTING_EVIDENCE
+- NO_RELIABLE_MATCH
+
+Explain the verdict in clear user-facing language.
+
+### H. Decision report
+
+Preserve Spark's existing ten-section report:
+
+1. Overview.
+2. Specifications.
+3. Performance.
+4. Advantages.
+5. Disadvantages.
+6. Price & Value.
+7. Evaluation.
+8. Comparison.
+9. Verdict.
+10. Sources.
+
+Improve clarity, evidence traceability, and consistency.
+
+Never expose raw internal JSON, private agent reasoning, credentials, or internal execution traces in the user-facing report.
+
+---
+
+# 5. ADVANCED SHOPPING INTELLIGENCE AND CART CONTROL
+
+Improve the agent's ability to manage real shopping workflows using the existing Cart and Phase 3 purchase execution architecture.
+
+### Agent capabilities
+
+- Understand natural-language shopping requests.
+- Identify the intended product and variant.
+- Ask clarification questions when product identity is ambiguous.
+- Search Channel3 for verified products.
+- Compare available merchants and offers.
+- Add selected products to Cart.
+- Read and update the user's Cart.
+- Change quantities when explicitly requested.
+- Remove items when requested.
+- Revalidate price and availability.
+- Identify coupon eligibility.
+- Validate known shipping and tax costs.
+- Prepare a complete order summary.
+- Detect order inconsistencies.
+- Initiate checkout only after explicit user authorization.
+
+### Cart intelligence
+
+Implement context-aware Cart operations.
+
+Examples:
+
+- "Add this product to my Cart."
+- "Add two units."
+- "Remove the previous item."
+- "Compare the Cart with this alternative."
+- "Find a valid coupon for this product."
+- "Check whether any price has changed."
+- "What is my final payable amount?"
+
+The agent must operate only on the authenticated user's Cart.
+
+### Purchase safeguards
+
+Preserve all Phase 3 transaction protections:
+
+- Explicit Spark authorization.
+- Authorization bound to exact order details and amount.
+- PayPal Sandbox order creation.
+- Official PayPal buyer approval.
+- Backend approval verification.
+- Capture only after verified approval.
+- Idempotent capture.
+- PayPal confirmation.
+- Firebase transaction persistence.
+- Purchases integration.
+
+Never interpret conversational context alone as permission to capture payment.
+
+Do not bypass any payment state transition.
+
+---
+
+# 6. VOICE MODE — COMPLETE DEVELOPMENT
+
+Develop Voice Mode into a reliable voice interaction system integrated with Spark's agent architecture.
+
+First inspect the existing implementation and identify the actual source of any known Voice Mode failures.
+
+Do not assume the issue is frontend-only.
+
+### A. Voice experience
+
+Implement:
+
+- Clear voice activation and deactivation.
+- Microphone permission handling.
+- Recording state indicators.
+- Listening and processing states.
+- Spoken responses.
+- Interrupt and stop controls.
+- Error recovery.
+- Text fallback.
+- Conversation continuity.
+
+The visual interface must match Spark's premium design system.
+
+Avoid unnecessary decorative elements.
+
+### B. Speech recognition
+
+Improve:
+
+- Recognition accuracy.
+- Natural-language command handling.
+- Product name recognition.
+- Technical terminology.
+- Numbers and prices.
+- Currency recognition.
+- Mixed-language handling where supported.
+- Noise and interruption handling.
+
+Do not silently reinterpret an uncertain product name or amount.
+
+Ask the user to confirm ambiguous purchase details.
+
+### C. Speech synthesis
+
+Improve:
+
+- Response naturalness.
+- Pronunciation.
+- Response timing.
+- Playback controls.
+- Interruption handling.
+- Consistency between spoken and displayed responses.
+
+Do not speak a purchase as completed before payment verification.
+
+### D. Voice and agent integration
+
+Voice requests must use the same intent detection, specialist agents, Omega, Cart, and purchase authorization rules as text requests.
+
+Do not create a separate unsafe voice-only shopping path.
+
+### E. Reliability and privacy
+
+- Request microphone permission only when needed.
+- Handle denied permissions.
+- Avoid recording without user awareness.
+- Do not expose private audio data.
+- Respect available provider and browser limitations.
+- Provide a usable text alternative.
+
+### F. Voice tests
+
+Test:
+
+- Permission granted.
+- Permission denied.
+- Speech recognition success.
+- Recognition failure.
+- Interrupted speech.
+- Background noise.
+- Arabic and supported language inputs.
+- Product name recognition.
+- Price and quantity recognition.
+- Voice-initiated product search.
+- Voice-initiated Cart updates.
+- Voice purchase authorization safeguards.
+- Text fallback.
+
+---
+
+# 7. INTENT UNDERSTANDING AND CONSTRAINT MANAGEMENT
+
+Develop intent understanding beyond basic keyword matching.
+
+### Requirements extraction
+
+Recognize:
+
+- Product categories.
+- Intended use.
+- Budget.
+- Currency.
+- Technical requirements.
+- Performance priorities.
+- Merchant preferences.
+- Exclusions.
+- Required compatibility.
+- Quality preferences.
+- Purchase intent.
+- Research intent.
+
+### Constraint hierarchy
+
+Distinguish:
+
+1. Hard constraints — mandatory conditions.
+2. Soft constraints — preferences.
+3. Conditional constraints — apply only in specific situations.
+4. Exclusions — explicitly rejected features or options.
+5. Unknown constraints — require clarification when essential.
+
+Never silently relax a hard constraint to produce more search results.
+
+### Multi-turn context
+
+Preserve relevant constraints across turns.
+
+Example:
+
+User: "Find a laptop for programming under $1,500."
+
+Later: "It must have 32GB RAM."
+
+Later: "Compare it with a lighter option."
+
+The agent must preserve the original budget and programming purpose while applying the new requirements.
+
+### Contradiction handling
+
+Detect:
+
+- Conflicting budgets.
+- Incompatible specifications.
+- Changed quantities.
+- Conflicting product preferences.
+- New requirements that invalidate previous results.
+
+Ask for clarification when the conflict materially affects the result.
+
+### Intent confidence
+
+Use confidence thresholds to determine whether to:
+
+- Proceed.
+- Search.
+- Ask a clarification question.
+- Request confirmation.
+- Reject an unsafe or impossible action.
+
+Do not expose arbitrary numerical confidence as certainty.
+
+---
+
+# 8. MULTI-STAGE RESEARCH AND SEARCH EFFICIENCY
+
+Improve search speed without sacrificing accuracy.
+
+### Research pipeline
+
+Implement an adaptive research workflow:
+
+**Stage 1 — Intent and Requirements**
+
+Extract the objective and constraints.
+
+**Stage 2 — Initial Discovery**
+
+Search Channel3 using structured queries.
+
+**Stage 3 — Candidate Validation**
+
+Resolve product identities, variants, and duplicates.
+
+**Stage 4 — Targeted Research**
+
+Investigate missing or important specifications.
+
+**Stage 5 — Pricing and Commercial Validation**
+
+Verify available prices, merchants, and relevant costs.
+
+**Stage 6 — Independent Verification**
+
+Challenge inconsistencies and unsupported claims.
+
+**Stage 7 — Omega Decision**
+
+Produce the evidence-based verdict.
+
+### Adaptive search expansion
+
+If results are insufficient:
+
+- Refine search terms.
+- Use category-aware query expansion.
+- Search for equivalent model names.
+- Relax only soft constraints when justified.
+- Preserve all hard constraints.
+- Explain when no reliable match exists.
+
+### Performance engineering
+
+Measure and improve:
+
+- Time to first useful result.
+- Total research completion time.
+- Channel3 request count.
+- Agent execution duration.
+- Model latency.
+- Duplicate research requests.
+- Cache hit rate where caching is used.
+- Failed and retried operations.
+
+Implement:
+
+- Parallel execution for independent tasks.
+- Dependency-aware execution.
+- Request deduplication.
+- Safe caching with freshness controls.
+- Timeouts.
+- Cancellation.
+- Bounded retries with backoff.
+- Token and context optimization.
+- Incremental result presentation where supported.
+
+Never sacrifice source verification for speed.
+
+Do not cache prices or availability indefinitely.
+
+### Performance comparison
+
+Record baseline measurements before optimization.
+
+After implementation, compare equivalent test cases and report actual improvements.
+
+Do not claim percentage improvements without measurements.
+
+---
+
+# 9. ANTI-HALLUCINATION AND PRODUCT DATA INTEGRITY
+
+This is a critical system-wide requirement.
+
+Implement a strict evidence-grounded response architecture.
+
+### Product price integrity
+
+Every displayed price must:
+
+- Originate from a real Channel3 result.
+- Preserve the correct currency.
+- Be associated with the correct product and merchant.
+- Have a traceable source reference.
+- Have an appropriate freshness indicator.
+- Be distinguished from historical or cached values.
+
+Never generate an approximate price and present it as verified.
+
+### Specification integrity
+
+Every important specification must have a source or be clearly classified as an inference.
+
+Do not:
+
+- Fill missing specifications with common industry assumptions.
+- Confuse product variants.
+- Combine specifications from different model generations.
+- Treat a merchant description as independent verification.
+- Present unsupported compatibility claims as facts.
+
+### Response validation layer
+
+Before returning important factual claims:
+
+1. Extract the claims.
+2. Identify the supporting evidence.
+3. Verify product identity.
+4. Check source references.
+5. Detect contradictory values.
+6. Identify unknown fields.
+7. Remove unsupported assertions.
+8. Label remaining uncertainty clearly.
+
+### Structured evidence model
+
+Use a consistent internal representation:
+
+- Claim.
+- Value.
+- Classification.
+- Source identifier.
+- Source type.
+- Product identifier.
+- Merchant identifier where applicable.
+- Retrieval timestamp.
+- Verification status.
+- Confidence.
+- Contradiction references.
+
+Do not expose sensitive internal metadata to users.
+
+### Safe response behavior
+
+When evidence is missing, say so.
+
+Examples:
+
+- "The current shipping cost could not be verified."
+- "The available source does not confirm this specification."
+- "The merchant's listed price requires revalidation."
+- "I found no sufficiently verified match for your requirements."
+
+Do not replace uncertainty with invented answers.
+
+---
+
+# 10. ERROR RECOVERY AND AGENT RELIABILITY
+
+Implement robust failure handling across the entire intelligence pipeline.
+
+Handle:
+
+- Gemini failures.
+- Claude failures.
+- Channel3 timeouts.
+- Malformed Channel3 responses.
+- Missing product fields.
+- Agent execution failures.
+- Agent disagreement.
+- Omega validation failure.
+- Firebase failures.
+- Context reconstruction failure.
+- Voice recognition failures.
+- Interrupted research.
+- Network errors.
+
+Requirements:
+
+- Detect partial research results.
+- Preserve completed valid work.
+- Retry only safe transient failures.
+- Prevent duplicate tool execution.
+- Avoid infinite agent loops.
+- Cancel obsolete tasks.
+- Provide clear user-facing error messages.
+- Record sanitized operational diagnostics.
+
+An agent failure must not silently become a successful recommendation.
+
+If the system cannot verify an essential claim, downgrade the recommendation or stop.
+
+---
+
+# 11. OBSERVABILITY AND EVALUATION
+
+Implement measurable quality monitoring.
+
+Track:
+
+- Intent extraction accuracy.
+- Hard-constraint preservation.
+- Product identity accuracy.
+- Channel3 source coverage.
+- Price correctness.
+- Specification support rate.
+- Contradiction detection.
+- Agent completion and failure rates.
+- Omega verdict consistency.
+- Research latency.
+- Voice recognition success.
+- Cart operation success.
+- Purchase workflow safety.
+
+Build a controlled evaluation dataset covering different product categories, ambiguous requests, contradictory requirements, missing prices, unavailable products, and multi-turn conversations.
+
+Use repeatable test cases.
+
+Never use fabricated production metrics.
+
+Protect user privacy and avoid logging sensitive personal or payment data.
+
+---
+
+# 12. REQUIRED TEST SCENARIOS
+
+Execute the following scenarios using the real application architecture and controlled test data.
+
+### Scenario A — Straightforward Product Search
+
+User requests a specific product with clear specifications.
+
+Verify correct intent extraction, Channel3 discovery, identity resolution, evidence, and response.
+
+### Scenario B — Complex Requirements
+
+User specifies category, budget, technical requirements, exclusions, and intended use.
+
+Verify hard constraints are preserved across all agents.
+
+### Scenario C — Multi-Turn Constraint Update
+
+User adds or changes requirements over several turns.
+
+Verify correct context updates and invalidation of outdated results.
+
+### Scenario D — Conflicting Product Data
+
+Channel3 returns conflicting values.
+
+Verify conflict detection and that Omega does not silently choose an unsupported value.
+
+### Scenario E — Missing Price
+
+A product has specifications but no reliable current price.
+
+Verify that the system does not invent a price or present an unsupported value as verified.
+
+### Scenario F — Insufficient Search Results
+
+Verify adaptive search expansion without violating mandatory constraints.
+
+### Scenario G — Agent Failure
+
+Simulate one specialist failing.
+
+Verify controlled recovery and no false completion.
+
+### Scenario H — Omega Challenge
+
+Provide contradictory or weak evidence.
+
+Verify that Omega can reject unsupported recommendations.
+
+### Scenario I — Voice Shopping
+
+Use voice to search for a product, select a result, and add it to Cart.
+
+Verify that the same security and validation rules apply as in text mode.
+
+### Scenario J — Purchase Safety
+
+Initiate a purchase workflow.
+
+Verify explicit authorization, PayPal Sandbox buyer approval, backend verification, and capture safeguards.
+
+Verify that ambiguous voice input or changed prices cannot authorize a different purchase.
+
+### Scenario K — Performance
+
+Run comparable baseline and optimized searches.
+
+Measure actual latency, request count, and result quality.
+
+### Scenario L — Hallucination Resistance
+
+Test missing specifications, unknown shipping, unsupported ratings, and unavailable prices.
+
+Verify that uncertainty is preserved.
+
+---
+
+# 13. IMPLEMENTATION SEQUENCE
+
+Execute in these controlled batches:
+
+**Batch A — Intelligence Architecture Audit**
+Inspect the orchestrator, seven agents, Omega, tool contracts, prompts, context management, and evaluation architecture.
+
+**Batch B — Seven-Agent Coordination**
+Improve agent contracts, task routing, parallel execution, dependency handling, and failure recovery.
+
+**Batch C — Omega Decision Crucible**
+Implement evidence aggregation, independent verification, mandatory requirement checks, Pareto analysis, decision confidence, and report quality.
+
+**Batch D — Shopping and Cart Intelligence**
+Improve intent-driven Cart operations and integrate them with the Phase 3 purchase execution safeguards.
+
+**Batch E — Voice Mode**
+Diagnose existing failures, improve recognition, synthesis, controls, privacy, and agent integration.
+
+**Batch F — Intent and Research Optimization**
+Improve constraint understanding, multi-turn context, adaptive search, latency, and research efficiency.
+
+**Batch G — Evidence Integrity and Reliability**
+Implement anti-hallucination validation, source traceability, failure recovery, and observability.
+
+**Batch H — Final Evaluation**
+Run all required scenarios, regression tests, security checks, performance measurements, and browser verification.
+
+Complete and verify each batch before moving to the next.
+
+---
+
+# 14. FINAL ACCEPTANCE CRITERIA
+
+Phase 5 is complete only when:
+
+1. All seven agents have clear responsibilities and validated output contracts.
+2. The orchestrator coordinates agents without unnecessary duplication.
+3. Independent agents can challenge unsupported findings.
+4. Omega produces evidence-based, explainable decisions.
+5. Mandatory user constraints are preserved.
+6. Multi-turn context works reliably.
+7. Product identity and variants are handled correctly.
+8. Shopping and Cart operations work through secure backend tools.
+9. Phase 3 purchase safeguards remain intact.
+10. Voice Mode works reliably or documented provider limitations are clearly identified.
+11. Multi-stage research improves efficiency without reducing accuracy.
+12. Price and specification hallucinations are prevented by evidence validation.
+13. Failure recovery works without false success.
+14. Performance is measured against a real baseline.
+15. Automated tests, security checks, and production build pass.
+16. Existing Spark features and integrations remain functional.
+
+A prompt-only change does not count as completed implementation.
+
+---
+
+# 15. FINAL EXECUTION REPORT
+
+Provide:
+
+### Agent Architecture
+- Seven-agent status.
+- Orchestrator improvements.
+- Agent contracts and execution model.
+- Failure recovery results.
+
+### Omega
+- Evidence validation.
+- Decision methodology.
+- Mandatory constraint handling.
+- Pareto and confidence results.
+- Report verification.
+
+### Shopping
+- Cart operation results.
+- Purchase workflow integration.
+- Authorization and PayPal safeguards.
+
+### Voice Mode
+- Root cause of previous failures.
+- Implemented improvements.
+- Supported languages and limitations.
+- Test results.
+
+### Research and Performance
+- Baseline measurements.
+- Final measurements.
+- Channel3 request counts.
+- Search quality results.
+- Latency improvements.
+
+### Factual Reliability
+- Price verification tests.
+- Specification verification tests.
+- Unknown-data handling.
+- Contradiction detection.
+- Unsupported-claim rejection.
+
+### Engineering Evidence
+- Modified files.
+- Backend changes.
+- Tests executed.
+- Actual pass/fail counts.
+- Build and security results.
+- Known limitations.
+- Remaining blockers.
+
+Use only:
+
+- PASS — implemented and verified.
+- PARTIAL — implemented with outstanding requirements.
+- FAIL — implementation or verification failed.
+- BLOCKED — blocked by a documented external dependency.
+
+Do not fabricate evidence, performance metrics, source verification, or test results.
+
+**FINAL OBJECTIVE: Spark must become a coordinated, evidence-driven AI shopping intelligence system that understands users accurately, researches efficiently, makes defensible decisions, manages Cart intelligently, supports natural voice interaction, and never invents product facts or bypasses purchase authorization.**
