@@ -1,0 +1,728 @@
+{
+  "entities": {
+    "UserPreferencesDoc": {
+      "title": "UserPreferencesDoc",
+      "description": "User personalization and interface preferences stored at /users/{userId}",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name chosen by the user",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "preferredName": {
+          "type": "string",
+          "description": "How Spark should address the user",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Profile avatar URL or CSS gradient token",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "theme": {
+          "type": "string",
+          "description": "Interface appearance mode",
+          "enum": ["dark", "light", "system"]
+        },
+        "accentColor": {
+          "type": "string",
+          "description": "Interface accent color",
+          "enum": ["violet", "blue", "cyan", "emerald"]
+        },
+        "language": {
+          "type": "string",
+          "description": "Interface language code",
+          "enum": ["en", "es", "fr", "de", "ja"]
+        },
+        "soundEnabled": {
+          "type": "boolean",
+          "description": "Whether task completion sound is enabled"
+        },
+        "defaultCurrency": {
+          "type": "string",
+          "description": "Preferred display currency",
+          "enum": ["USD", "EUR", "GBP"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "preferredName",
+        "avatarUrl",
+        "theme",
+        "accentColor",
+        "language",
+        "soundEnabled",
+        "defaultCurrency",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPrivateInfoDoc": {
+      "title": "UserPrivateInfoDoc",
+      "description": "Isolated PII document for user email and verified PayPal connection metadata",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "email", "createdAt", "updatedAt"]
+    },
+    "SearchAuditDoc": {
+      "title": "SearchAuditDoc",
+      "description": "Record of a real-data shopping query executed by the user",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "verifiedResultCount": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["completed", "no_verified_results", "source_error"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "query", "verifiedResultCount", "status", "createdAt"]
+    },
+    "SavedProductDoc": {
+      "title": "SavedProductDoc",
+      "description": "Verified product saved by the user in /users/{userId}/savedProducts/{productId}",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "productId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "sourceName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "merchant": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "canonicalUrl": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 500
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["USD", "EUR", "GBP"]
+        },
+        "price": {
+          "type": "number"
+        },
+        "priceStatus": {
+          "type": "string",
+          "enum": ["verified", "price_could_not_be_verified"]
+        },
+        "imageUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "productId",
+        "sourceId",
+        "sourceName",
+        "name",
+        "merchant",
+        "canonicalUrl",
+        "currency",
+        "price",
+        "priceStatus",
+        "imageUrl",
+        "createdAt"
+      ]
+    },
+    "ConversationDoc": {
+      "title": "ConversationDoc",
+      "description": "User shopping conversation thread metadata stored at /users/{userId}/conversations/{conversationId}",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "conversationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "lastPrompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "turnCount": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "conversationId",
+        "title",
+        "lastPrompt",
+        "turnCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PurchaseDoc": {
+      "title": "PurchaseDoc",
+      "description": "Authoritative purchase record created only after verified PayPal capture",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "orderReference": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
+        "paypalTransactionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "productId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "productName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "merchant": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "quantity": {
+          "type": "integer"
+        },
+        "totalAmount": {
+          "type": "number"
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["USD", "EUR", "GBP"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "completed", "failed", "cancelled", "refunded"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "orderReference",
+        "paypalTransactionId",
+        "sourceId",
+        "productId",
+        "productName",
+        "merchant",
+        "quantity",
+        "totalAmount",
+        "currency",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PaymentConnectionDoc": {
+      "title": "PaymentConnectionDoc",
+      "description": "Verified PayPal identity connection stored at /users/{userId}/paymentConnections/{providerId}",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["paypal"]
+        },
+        "paypalSubjectId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "payerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "maskedEmail": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "emailVerified": {
+          "type": "boolean"
+        },
+        "verifiedAccount": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["connected", "disconnected"]
+        },
+        "connectedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "provider",
+        "paypalSubjectId",
+        "payerId",
+        "maskedEmail",
+        "emailVerified",
+        "verifiedAccount",
+        "status",
+        "connectedAt",
+        "updatedAt"
+      ]
+    },
+    "SandboxPaymentOrderDoc": {
+      "title": "SandboxPaymentOrderDoc",
+      "description": "Sandbox payment order stored at /users/{userId}/sandbox_payment_orders/{orderId}",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "product_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "merchant_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "paypal_order_id": { "type": "string", "minLength": 0, "maxLength": 128 },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["USD"] },
+        "status": {
+          "type": "string",
+          "enum": [
+            "DRAFT",
+            "AWAITING_USER_CONFIRMATION",
+            "AWAITING_PAYPAL_APPROVAL",
+            "APPROVED",
+            "CAPTURE_PENDING",
+            "COMPLETED",
+            "DECLINED",
+            "CANCELLED",
+            "EXPIRED",
+            "FAILED",
+            "REFUNDED"
+          ]
+        },
+        "execution_mode": {
+          "type": "string",
+          "enum": ["SANDBOX_SIMULATION", "MERCHANT_CHECKOUT"]
+        },
+        "authorization_hash": { "type": "string", "minLength": 0, "maxLength": 128 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "user_id",
+        "product_id",
+        "merchant_id",
+        "amount",
+        "currency",
+        "status",
+        "execution_mode",
+        "created_at",
+        "expires_at"
+      ]
+    },
+    "SandboxPaymentCaptureDoc": {
+      "title": "SandboxPaymentCaptureDoc",
+      "description": "Sandbox payment capture stored at /users/{userId}/sandbox_payment_captures/{captureId}",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "order_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "paypal_capture_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["USD"] },
+        "capture_status": {
+          "type": "string",
+          "enum": ["COMPLETED", "DECLINED", "PENDING", "FAILED", "REFUNDED"]
+        },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "user_id",
+        "order_id",
+        "paypal_capture_id",
+        "amount",
+        "currency",
+        "capture_status",
+        "created_at"
+      ]
+    },
+    "SandboxPaymentEventDoc": {
+      "title": "SandboxPaymentEventDoc",
+      "description": "Verified PayPal Sandbox webhook event stored at /users/{userId}/sandbox_payment_events/{eventId}",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "paypal_event_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "order_id": { "type": "string", "minLength": 0, "maxLength": 128 },
+        "event_type": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "signature_verified": { "type": "boolean" },
+        "processed_at": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "user_id",
+        "paypal_event_id",
+        "event_type",
+        "signature_verified",
+        "processed_at"
+      ]
+    },
+    "PurchaseAuditLogDoc": {
+      "title": "PurchaseAuditLogDoc",
+      "description": "Immutable autonomous purchasing security audit log stored at /users/{userId}/purchase_audit_logs/{logId}",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "order_id": { "type": "string", "minLength": 0, "maxLength": 128 },
+        "action": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "result": { "type": "string", "enum": ["ALLOWED", "BLOCKED", "VERIFIED", "FAILED"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 500 }
+      },
+      "required": ["id", "user_id", "action", "result", "timestamp", "detail"]
+    },
+    "FeedicoOfferDoc": {
+      "title": "FeedicoOfferDoc",
+      "description": "Normalized Feedico Partner API coupon/offer record stored at /users/{userId}/feedico_offers/{offerId}",
+      "type": "object",
+      "properties": {
+        "feedico_offer_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "merchant_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "merchant_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "coupon_code": { "type": "string", "minLength": 0, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "discount": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "start_date": { "type": "string", "minLength": 0, "maxLength": 64 },
+        "expiration_date": { "type": "string", "minLength": 0, "maxLength": 64 },
+        "target_countries": { "type": "array", "items": { "type": "string" } },
+        "eligibility_conditions": { "type": "array", "items": { "type": "string" } },
+        "original_source": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "tracked_url": { "type": "string", "minLength": 5, "maxLength": 600 },
+        "last_synced_at": { "type": "string", "format": "date-time" },
+        "verification_status": {
+          "type": "string",
+          "enum": ["verified_active", "no_code_deal", "unverified", "expired"]
+        }
+      },
+      "required": [
+        "feedico_offer_id",
+        "merchant_id",
+        "merchant_name",
+        "title",
+        "description",
+        "discount",
+        "target_countries",
+        "eligibility_conditions",
+        "original_source",
+        "tracked_url",
+        "last_synced_at",
+        "verification_status"
+      ]
+    },
+    "AffiliateClickEventDoc": {
+      "title": "AffiliateClickEventDoc",
+      "description": "Authenticated user affiliate click attribution record stored at /users/{userId}/affiliate_clicks/{clickId}",
+      "type": "object",
+      "properties": {
+        "click_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sub_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "feedico_offer_id": { "type": "string", "minLength": 0, "maxLength": 128 },
+        "merchant_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "merchant_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "coupon_code": { "type": "string", "minLength": 0, "maxLength": 128 },
+        "tracked_url": { "type": "string", "minLength": 5, "maxLength": 600 },
+        "clicked_at": { "type": "string", "format": "date-time" },
+        "outcome_status": {
+          "type": "string",
+          "enum": [
+            "CLICK_RECORDED_NOT_PURCHASE",
+            "COMMISSION_PENDING",
+            "COMMISSION_APPROVED",
+            "COMMISSION_DECLINED",
+            "COMMISSION_PAID"
+          ]
+        }
+      },
+      "required": [
+        "click_id",
+        "user_id",
+        "sub_id",
+        "merchant_id",
+        "merchant_name",
+        "tracked_url",
+        "clicked_at",
+        "outcome_status"
+      ]
+    },
+    "UserCartDoc": {
+      "title": "UserCartDoc",
+      "description": "Persistent, user-isolated shopping cart document at /users/{userId}/cart/current with optimistic concurrency revision tracking.",
+      "type": "object",
+      "properties": {
+        "cartId": {
+          "type": "string",
+          "enum": ["current"]
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID"
+        },
+        "revision": {
+          "type": "integer",
+          "description": "Monotonically increasing cart revision counter to prevent stale overwrites"
+        },
+        "itemCount": {
+          "type": "integer",
+          "description": "Total quantity of items in the cart (0 to 250)"
+        },
+        "uniqueProductCount": {
+          "type": "integer",
+          "description": "Number of distinct product+variant line items in the cart (0 to 50)"
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["USD", "EUR", "GBP"]
+        },
+        "subtotal": {
+          "type": "number",
+          "description": "Last server-verified merchandise subtotal"
+        },
+        "verifiedDiscountTotal": {
+          "type": "number",
+          "description": "Last server-verified coupon discount amount"
+        },
+        "appliedCouponCode": {
+          "type": "string",
+          "description": "Active coupon code or empty string when none is applied"
+        },
+        "itemsJson": {
+          "type": "string",
+          "description": "Bounded JSON payload of verified CartItem line items including productId, offerId, SKU/variant, selectedOptions, merchant, lastVerifiedPrice, and priceVerifiedAt"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "cartId",
+        "userId",
+        "revision",
+        "itemCount",
+        "uniqueProductCount",
+        "currency",
+        "subtotal",
+        "verifiedDiscountTotal",
+        "appliedCouponCode",
+        "itemsJson",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPreferencesDoc" },
+      "description": "Owner-isolated user personalization profile"
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfoDoc" },
+      "description": "Strictly isolated PII subcollection for user email"
+    },
+    "/users/{userId}/searches/{searchId}": {
+      "schema": { "$ref": "#/entities/SearchAuditDoc" },
+      "description": "Real-data search history belonging to the user"
+    },
+    "/users/{userId}/savedProducts/{productId}": {
+      "schema": { "$ref": "#/entities/SavedProductDoc" },
+      "description": "Real source-backed products explicitly saved by the user"
+    },
+    "/users/{userId}/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/ConversationDoc" },
+      "description": "Recent shopping conversations belonging to the user"
+    },
+    "/users/{userId}/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/PurchaseDoc" },
+      "description": "Verified PayPal purchase history belonging to the user"
+    },
+    "/users/{userId}/paymentConnections/{providerId}": {
+      "schema": { "$ref": "#/entities/PaymentConnectionDoc" },
+      "description": "Verified PayPal identity connection belonging to the user"
+    },
+    "/users/{userId}/cart/{cartId}": {
+      "schema": { "$ref": "#/entities/UserCartDoc" },
+      "description": "Owner-isolated persistent shopping cart (/users/{userId}/cart/current)"
+    },
+    "/users/{userId}/sandbox_payment_orders/{orderId}": {
+      "schema": { "$ref": "#/entities/SandboxPaymentOrderDoc" },
+      "description": "Owner-isolated PayPal Sandbox payment orders"
+    },
+    "/users/{userId}/sandbox_payment_captures/{captureId}": {
+      "schema": { "$ref": "#/entities/SandboxPaymentCaptureDoc" },
+      "description": "Owner-isolated PayPal Sandbox payment captures"
+    },
+    "/users/{userId}/sandbox_payment_events/{eventId}": {
+      "schema": { "$ref": "#/entities/SandboxPaymentEventDoc" },
+      "description": "Owner-isolated verified PayPal Sandbox webhook events"
+    },
+    "/users/{userId}/purchase_audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/PurchaseAuditLogDoc" },
+      "description": "Owner-isolated autonomous purchasing audit logs"
+    },
+    "/users/{userId}/feedico_offers/{offerId}": {
+      "schema": { "$ref": "#/entities/FeedicoOfferDoc" },
+      "description": "Owner-isolated cached Feedico Partner API coupon and promotional offers"
+    },
+    "/users/{userId}/affiliate_clicks/{clickId}": {
+      "schema": { "$ref": "#/entities/AffiliateClickEventDoc" },
+      "description": "Owner-isolated affiliate click attribution records"
+    }
+  }
+}
+

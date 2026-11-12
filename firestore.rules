@@ -1,0 +1,533 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable Hardened Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function parentUserExists(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+        get(/databases/$(database)/documents/users/$(userId)).data.userId == request.auth.uid;
+    }
+
+    // Validation Blueprint: UserPreferencesDoc (/users/{userId})
+    function isValidUserPreferences(data) {
+      return data.keys().hasAll([
+          'userId',
+          'displayName',
+          'preferredName',
+          'avatarUrl',
+          'theme',
+          'accentColor',
+          'language',
+          'soundEnabled',
+          'defaultCurrency',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'displayName',
+          'preferredName',
+          'avatarUrl',
+          'theme',
+          'accentColor',
+          'language',
+          'soundEnabled',
+          'defaultCurrency',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.preferredName is string && data.preferredName.size() >= 1 && data.preferredName.size() <= 60 &&
+        data.avatarUrl is string && data.avatarUrl.size() >= 1 && data.avatarUrl.size() <= 500 &&
+        data.theme is string && data.theme.size() <= 16 && (data.theme == 'dark' || data.theme == 'light' || data.theme == 'system') &&
+        data.accentColor is string && data.accentColor.size() <= 16 && (data.accentColor == 'violet' || data.accentColor == 'blue' || data.accentColor == 'cyan' || data.accentColor == 'emerald') &&
+        data.language is string && data.language.size() <= 8 && (data.language == 'en' || data.language == 'es' || data.language == 'fr' || data.language == 'de' || data.language == 'ja') &&
+        data.soundEnabled is bool &&
+        data.defaultCurrency is string && data.defaultCurrency.size() == 3 && (data.defaultCurrency == 'USD' || data.defaultCurrency == 'EUR' || data.defaultCurrency == 'GBP') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: UserPrivateInfoDoc (/users/{userId}/private/{docId})
+    function isValidUserPrivateInfo(data) {
+      return data.keys().hasAll(['userId', 'email', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'email', 'createdAt', 'updatedAt']) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: SearchAuditDoc (/users/{userId}/searches/{searchId})
+    function isValidSearchAudit(data) {
+      return data.keys().hasAll(['userId', 'query', 'verifiedResultCount', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['userId', 'query', 'verifiedResultCount', 'status', 'createdAt']) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.query is string && data.query.size() >= 1 && data.query.size() <= 300 &&
+        data.verifiedResultCount is int && data.verifiedResultCount >= 0 && data.verifiedResultCount <= 500 &&
+        data.status is string && data.status.size() <= 32 &&
+        (data.status == 'completed' || data.status == 'no_verified_results' || data.status == 'source_error') &&
+        data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: SavedProductDoc (/users/{userId}/savedProducts/{productId})
+    function isValidSavedProduct(data) {
+      return data.keys().hasAll([
+          'userId',
+          'productId',
+          'sourceId',
+          'sourceName',
+          'name',
+          'merchant',
+          'canonicalUrl',
+          'currency',
+          'price',
+          'priceStatus',
+          'imageUrl',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'productId',
+          'sourceId',
+          'sourceName',
+          'name',
+          'merchant',
+          'canonicalUrl',
+          'currency',
+          'price',
+          'priceStatus',
+          'imageUrl',
+          'createdAt'
+        ]) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.productId is string && data.productId.size() >= 1 && data.productId.size() <= 128 &&
+        data.sourceId is string && data.sourceId.size() >= 2 && data.sourceId.size() <= 64 &&
+        data.sourceName is string && data.sourceName.size() >= 2 && data.sourceName.size() <= 120 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+        data.merchant is string && data.merchant.size() >= 1 && data.merchant.size() <= 120 &&
+        data.canonicalUrl is string && data.canonicalUrl.size() >= 5 && data.canonicalUrl.size() <= 500 &&
+        data.currency is string && data.currency.size() == 3 &&
+        (data.currency == 'USD' || data.currency == 'EUR' || data.currency == 'GBP') &&
+        (data.price is number || data.price is int) && data.price >= -1 &&
+        data.priceStatus is string && data.priceStatus.size() <= 40 &&
+        (data.priceStatus == 'verified' || data.priceStatus == 'price_could_not_be_verified') &&
+        data.imageUrl is string && data.imageUrl.size() <= 500 &&
+        data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: ConversationDoc (/users/{userId}/conversations/{conversationId})
+    function isValidConversation(data) {
+      return data.keys().hasAll([
+          'userId',
+          'conversationId',
+          'title',
+          'lastPrompt',
+          'turnCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'conversationId',
+          'title',
+          'lastPrompt',
+          'turnCount',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.conversationId is string && data.conversationId.size() >= 1 && data.conversationId.size() <= 128 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 140 &&
+        data.lastPrompt is string && data.lastPrompt.size() >= 1 && data.lastPrompt.size() <= 300 &&
+        data.turnCount is int && data.turnCount >= 1 && data.turnCount <= 200 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: PurchaseDoc (/users/{userId}/purchases/{purchaseId})
+    function isValidPurchase(data) {
+      return data.keys().hasAll([
+          'userId',
+          'orderReference',
+          'paypalTransactionId',
+          'sourceId',
+          'productId',
+          'productName',
+          'merchant',
+          'quantity',
+          'totalAmount',
+          'currency',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'orderReference',
+          'paypalTransactionId',
+          'sourceId',
+          'productId',
+          'productName',
+          'merchant',
+          'quantity',
+          'totalAmount',
+          'currency',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.orderReference is string && data.orderReference.size() >= 3 && data.orderReference.size() <= 64 &&
+        data.paypalTransactionId is string && data.paypalTransactionId.size() >= 3 && data.paypalTransactionId.size() <= 128 &&
+        data.sourceId is string && data.sourceId.size() >= 2 && data.sourceId.size() <= 64 &&
+        data.productId is string && data.productId.size() >= 1 && data.productId.size() <= 128 &&
+        data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 200 &&
+        data.merchant is string && data.merchant.size() >= 1 && data.merchant.size() <= 120 &&
+        data.quantity is int && data.quantity >= 1 && data.quantity <= 20 &&
+        (data.totalAmount is number || data.totalAmount is int) && data.totalAmount >= 0 &&
+        data.currency is string && data.currency.size() == 3 &&
+        (data.currency == 'USD' || data.currency == 'EUR' || data.currency == 'GBP') &&
+        data.status is string && data.status.size() <= 20 &&
+        (data.status == 'pending' || data.status == 'completed' || data.status == 'failed' || data.status == 'cancelled' || data.status == 'refunded') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: PaymentConnectionDoc (/users/{userId}/paymentConnections/{providerId})
+    function isValidPaymentConnection(data) {
+      return data.keys().hasAll([
+          'userId',
+          'provider',
+          'paypalSubjectId',
+          'payerId',
+          'maskedEmail',
+          'emailVerified',
+          'verifiedAccount',
+          'status',
+          'connectedAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'provider',
+          'paypalSubjectId',
+          'payerId',
+          'maskedEmail',
+          'emailVerified',
+          'verifiedAccount',
+          'status',
+          'connectedAt',
+          'updatedAt'
+        ]) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.provider is string && data.provider == 'paypal' &&
+        data.paypalSubjectId is string && data.paypalSubjectId.size() >= 3 && data.paypalSubjectId.size() <= 200 &&
+        data.payerId is string && data.payerId.size() >= 1 && data.payerId.size() <= 128 &&
+        data.maskedEmail is string && data.maskedEmail.size() >= 3 && data.maskedEmail.size() <= 254 &&
+        data.emailVerified is bool &&
+        data.verifiedAccount is bool &&
+        data.status is string && (data.status == 'connected' || data.status == 'disconnected') &&
+        data.connectedAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: UserCartDoc (/users/{userId}/cart/{cartId})
+    function isValidUserCart(data) {
+      return data.keys().hasAll([
+          'cartId',
+          'userId',
+          'revision',
+          'itemCount',
+          'uniqueProductCount',
+          'currency',
+          'subtotal',
+          'verifiedDiscountTotal',
+          'appliedCouponCode',
+          'itemsJson',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'cartId',
+          'userId',
+          'revision',
+          'itemCount',
+          'uniqueProductCount',
+          'currency',
+          'subtotal',
+          'verifiedDiscountTotal',
+          'appliedCouponCode',
+          'itemsJson',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.cartId is string && data.cartId == 'current' &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.revision is int && data.revision >= 1 && data.revision <= 1000000 &&
+        data.itemCount is int && data.itemCount >= 0 && data.itemCount <= 250 &&
+        data.uniqueProductCount is int && data.uniqueProductCount >= 0 && data.uniqueProductCount <= 50 &&
+        data.currency is string && data.currency.size() == 3 &&
+        (data.currency == 'USD' || data.currency == 'EUR' || data.currency == 'GBP') &&
+        (data.subtotal is number || data.subtotal is int) && data.subtotal >= 0 &&
+        (data.verifiedDiscountTotal is number || data.verifiedDiscountTotal is int) && data.verifiedDiscountTotal >= 0 &&
+        data.appliedCouponCode is string && data.appliedCouponCode.size() <= 64 &&
+        data.itemsJson is string && data.itemsJson.size() >= 2 && data.itemsJson.size() <= 65536 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 1. User Preferences Profile
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId) && (resource == null || existing().userId == request.auth.uid);
+      allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) &&
+        isValidUserPreferences(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) &&
+        isValidUserPreferences(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName',
+          'preferredName',
+          'avatarUrl',
+          'theme',
+          'accentColor',
+          'language',
+          'soundEnabled',
+          'defaultCurrency',
+          'updatedAt'
+        ]);
+      allow delete: if false;
+
+      // 2. Strictly Isolated PII Subcollection
+      match /private/{docId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(docId) && (resource == null || existing().userId == request.auth.uid);
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(docId) &&
+          isValidUserPrivateInfo(incoming()) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(docId) &&
+          isValidUserPrivateInfo(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']) &&
+          parentUserExists(userId);
+        allow delete: if false;
+      }
+
+      // 3. Real-Data Search History Subcollection
+      match /searches/{searchId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(searchId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(searchId) &&
+          isValidSearchAudit(incoming()) &&
+          incoming().createdAt == request.time &&
+          parentUserExists(userId);
+        allow update, delete: if false;
+      }
+
+      // 4. Saved Products Subcollection
+      match /savedProducts/{productId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(productId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(productId) &&
+          isValidSavedProduct(incoming()) &&
+          incoming().productId == productId &&
+          incoming().createdAt == request.time &&
+          parentUserExists(userId);
+        allow update: if false;
+        allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(productId) &&
+          existing().userId == request.auth.uid &&
+          parentUserExists(userId);
+      }
+
+      // 5. Conversations Subcollection
+      match /conversations/{conversationId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(conversationId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(conversationId) &&
+          isValidConversation(incoming()) &&
+          incoming().conversationId == conversationId &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(conversationId) &&
+          isValidConversation(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().conversationId == existing().conversationId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'lastPrompt', 'turnCount', 'updatedAt']) &&
+          parentUserExists(userId);
+        allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(conversationId) &&
+          existing().userId == request.auth.uid &&
+          parentUserExists(userId);
+      }
+
+      // 6. Verified Purchases Subcollection (with Terminal State Locking)
+      match /purchases/{purchaseId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(purchaseId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(purchaseId) &&
+          isValidPurchase(incoming()) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(purchaseId) &&
+          isValidPurchase(incoming()) &&
+          (existing().status == 'pending' || (existing().status == 'completed' && incoming().status == 'refunded')) &&
+          incoming().userId == existing().userId &&
+          incoming().orderReference == existing().orderReference &&
+          incoming().sourceId == existing().sourceId &&
+          incoming().productId == existing().productId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paypalTransactionId', 'updatedAt']) &&
+          parentUserExists(userId);
+        allow delete: if false;
+      }
+
+      // 7. Verified Payment Connections Subcollection (Owner-Only, No OAuth Tokens Stored)
+      match /paymentConnections/{providerId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(providerId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && providerId == 'paypal' &&
+          isValidPaymentConnection(incoming()) &&
+          incoming().connectedAt == request.time &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && providerId == 'paypal' &&
+          isValidPaymentConnection(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().provider == existing().provider &&
+          incoming().paypalSubjectId == existing().paypalSubjectId &&
+          incoming().connectedAt == existing().connectedAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['maskedEmail', 'emailVerified', 'verifiedAccount', 'status', 'updatedAt']) &&
+          parentUserExists(userId);
+        allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && providerId == 'paypal' &&
+          existing().userId == request.auth.uid &&
+          parentUserExists(userId);
+      }
+
+      // 7b. Persistent User Shopping Cart (/users/{userId}/cart/current)
+      match /cart/{cartId} {
+        allow get: if isOwner(userId) && isValidId(userId) && cartId == 'current' && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && cartId == 'current' &&
+          isValidUserCart(incoming()) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && cartId == 'current' &&
+          isValidUserCart(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().cartId == existing().cartId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().revision >= existing().revision &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'revision',
+            'itemCount',
+            'uniqueProductCount',
+            'currency',
+            'subtotal',
+            'verifiedDiscountTotal',
+            'appliedCouponCode',
+            'itemsJson',
+            'updatedAt'
+          ]) &&
+          parentUserExists(userId);
+        allow delete: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && cartId == 'current' &&
+          existing().userId == request.auth.uid &&
+          parentUserExists(userId);
+      }
+
+      // 8. Sandbox Payment Orders Table (Owner-Only Row-Level Security)
+      match /sandbox_payment_orders/{orderId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(orderId) && (resource == null || existing().user_id == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.user_id == request.auth.uid;
+        allow create, update, delete: if false;
+      }
+
+      // 9. Sandbox Payment Captures Table (Owner-Only Row-Level Security)
+      match /sandbox_payment_captures/{captureId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(captureId) && (resource == null || existing().user_id == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.user_id == request.auth.uid;
+        allow create, update, delete: if false;
+      }
+
+      // 10. Sandbox Payment Events Table (Owner-Only Row-Level Security)
+      match /sandbox_payment_events/{eventId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(eventId) && (resource == null || existing().user_id == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.user_id == request.auth.uid;
+        allow create, update, delete: if false;
+      }
+
+      // 11. Purchase Audit Logs Table (Owner-Only Row-Level Security)
+      match /purchase_audit_logs/{logId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(logId) && (resource == null || existing().user_id == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.user_id == request.auth.uid;
+        allow create, update, delete: if false;
+      }
+
+      // 12. Normalized Feedico Partner API Offers Table (Owner-Only Row-Level Security)
+      match /feedico_offers/{offerId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(offerId) && (resource == null || existing().user_id == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.user_id == request.auth.uid;
+        allow create, update, delete: if false;
+      }
+
+      // 13. Affiliate Click Attribution Table (Owner-Only Row-Level Security)
+      match /affiliate_clicks/{clickId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(clickId) && (resource == null || existing().user_id == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.user_id == request.auth.uid;
+        allow create, update, delete: if false;
+      }
+    }
+  }
+}

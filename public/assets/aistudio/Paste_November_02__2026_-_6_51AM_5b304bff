@@ -1,0 +1,777 @@
+SPARK — ULTIMATE ENGINEERING RECONSTRUCTION, REPAIR, OPTIMIZATION & HONEST EVALUATION
+ROLE & AUTHORITY
+You are operating as an elite multidisciplinary engineering organization consisting of:
+Principal Software Architect
+Senior Full-Stack Engineers
+Senior Backend Engineers
+AI Agent Systems Engineers
+Cybersecurity Engineers
+Database Architects
+Payment Infrastructure Engineers
+Firebase Authentication Specialists
+QA Automation Engineers
+Performance Engineers
+UI/UX Engineers
+Production Reliability Engineers
+Your assignment is to conduct the most rigorous technical audit and repair operation ever performed on this Spark codebase.
+You are NOT here to praise the project, produce a superficial review, or generate an impressive-looking report.
+You are here to discover the truth, fix what is broken, eliminate technical weaknesses, and establish the actual engineering quality of Spark.
+Your highest priorities are correctness, functionality, security, reliability, and honesty.
+PHASE 1 — COMPLETE CODEBASE INVESTIGATION
+Before making modifications, investigate the entire project.
+Inspect:
+Complete source code and directory structure.
+Frontend architecture and every application page.
+Backend services and API routes.
+Database schema, relationships, migrations, and queries.
+Authentication and authorization.
+Firebase Authentication and Google OAuth.
+PayPal Sandbox integration and payment lifecycle.
+Spark AI agent and its internal architecture.
+All LLM and external API integrations.
+Product discovery and research mechanisms.
+Coupon integration through Feedico.
+All external service connections.
+File uploads and storage.
+User settings and account management.
+Error handling and logging.
+Environment variables and configuration.
+Background processes and asynchronous operations.
+Build, deployment, and production configuration.
+Automated tests and test fixtures.
+Inspect actual implementations, not just filenames, comments, documentation, or UI elements.
+Build an internal dependency map identifying critical connections and possible failure points.
+Do not start deleting or rewriting code before understanding its dependencies.
+PHASE 2 — ZERO-TRUST FUNCTIONALITY AUDIT
+Every feature must be tested against its actual implementation.
+Classify every feature into one of these categories:
+A. FULLY FUNCTIONAL:
+The complete operation works and has been verified.
+B. PARTIALLY FUNCTIONAL:
+Some operations work, but important functionality is missing or unreliable.
+C. UI ONLY:
+The interface exists, but the actual functionality is missing or simulated.
+D. MOCKED:
+The implementation uses mock data, fake responses, placeholders, or simulated operations.
+E. BROKEN:
+The feature exists but fails during execution.
+F. UNIMPLEMENTED:
+The feature is not actually implemented.
+G. UNVERIFIED:
+There is insufficient evidence to determine whether it works.
+Never classify a feature as functional simply because its button is clickable or its page renders.
+For every feature, trace the complete execution path:
+User action → Frontend → API → Backend logic → External service/database → Actual result → UI response.
+Identify every broken connection.
+PHASE 3 — COMPLETE ERROR CORRECTION
+Search for and repair all discoverable problems, including:
+Runtime errors.
+TypeScript errors.
+Type inconsistencies.
+Incorrect imports and exports.
+Missing dependencies.
+Broken references.
+Invalid API requests.
+Incorrect endpoint URLs.
+Incorrect HTTP methods.
+Authentication failures.
+Authorization vulnerabilities.
+Database inconsistencies.
+Missing database constraints.
+Race conditions.
+Duplicate requests.
+Memory leaks.
+Unhandled promises.
+Incorrect async/await behavior.
+Infinite loading states.
+Incorrect error boundaries.
+Broken redirects.
+Invalid environment variable references.
+Incorrect fallback behavior.
+Dead code.
+Duplicate implementations.
+Unused dependencies.
+Incomplete error recovery.
+Incorrect data validation.
+Unnecessary complexity.
+Fix root causes rather than hiding errors.
+Do not use empty catch blocks, fake success responses, disabled validations, or arbitrary timeouts as substitutes for actual fixes.
+Do not suppress TypeScript errors using any, @ts-ignore, or unsafe assertions unless there is a documented and technically justified reason.
+PHASE 4 — COMPLETE AUTHENTICATION & ACCOUNT INTEGRITY
+Thoroughly validate:
+Email/password authentication.
+Continue with Google using Firebase Auth.
+Registration.
+Login.
+Logout.
+Session persistence.
+Token refresh.
+Protected routes.
+Server-side token verification.
+User profile synchronization.
+Account linking.
+Duplicate account prevention.
+Password recovery.
+Authorization and ownership validation.
+Verify that each user can access only their own information.
+Ensure that first-time accounts begin with the correct empty state.
+Preserve existing accounts, settings, purchase history, and user-generated data.
+Never compromise account security to simplify authentication.
+PHASE 5 — PAYPAL PAYMENT INFRASTRUCTURE
+Treat payments as a critical financial subsystem.
+Audit the entire payment lifecycle:
+Account linking and OAuth.
+Access token acquisition.
+Order creation.
+Approval URL generation.
+User redirection to PayPal.
+Buyer approval.
+Return URL handling.
+Order capture.
+Capture verification.
+Webhook signature verification.
+Transaction persistence.
+Payment status synchronization.
+Duplicate payment prevention.
+Failure and cancellation recovery.
+Investigate the actual causes of:
+ORDER_NOT_APPROVED.
+Network errors.
+Invalid credentials.
+Expired access tokens.
+Invalid order states.
+Duplicate captures.
+Missing webhook events.
+Incorrect callback URLs.
+Never mark a purchase as paid before verified payment confirmation.
+Use idempotency and server-side verification.
+Never expose PayPal secrets.
+Preserve the existing PayPal integration rather than replacing it with a mock implementation.
+PHASE 6 — SPARK AI AGENT INTELLIGENCE
+Perform a deep architectural and functional audit of the Spark agent.
+Investigate:
+Reasoning and task planning.
+Model routing.
+Tool selection.
+Tool execution.
+Multi-agent coordination.
+Context management.
+Conversation memory.
+Error recovery.
+API timeouts.
+Retry policies.
+Structured outputs.
+Data extraction.
+Product discovery.
+Product comparison.
+Source verification.
+Coupon discovery.
+Real-world information retrieval.
+User intent understanding.
+Payment preparation and confirmation.
+Verify that the agent actually invokes its tools and receives real results.
+Prevent:
+Fabricated products.
+Invented prices.
+Fake discounts.
+Nonexistent coupons.
+Unsupported claims.
+Incorrect availability information.
+Unverified merchant links.
+Unauthorized actions.
+Duplicate tool executions.
+Require the agent to distinguish verified facts, estimates, and unavailable information.
+Improve reasoning quality, reliability, response relevance, and execution efficiency without introducing unnecessary complexity.
+Do not claim that the agent has autonomous capabilities that are not implemented.
+PHASE 7 — PRODUCT DISCOVERY & COUPON SYSTEM
+Audit product discovery and Feedico integration.
+Verify:
+Actual data sources.
+API authentication.
+API response parsing.
+Product normalization.
+Merchant identification.
+Product URLs.
+Image handling.
+Price accuracy.
+Currency handling.
+Coupon retrieval.
+Coupon expiration.
+Coupon eligibility.
+Regional restrictions.
+Duplicate products.
+Invalid results.
+API failure handling.
+Never fabricate product listings or coupons.
+Never present an unverified coupon as valid.
+If a provider requires an API key, partner approval, subscription, or external activation, explicitly identify that dependency.
+PHASE 8 — DATABASE & DATA INTEGRITY
+Inspect the complete database architecture.
+Verify:
+Schema correctness.
+Foreign key relationships.
+User isolation.
+Data consistency.
+Required constraints.
+Indexes.
+Query efficiency.
+Migration safety.
+Transaction handling.
+Duplicate record prevention.
+Deletion behavior.
+Backup and recovery assumptions.
+Identify orphaned records and inconsistent relationships.
+Do not delete production data or execute destructive migrations without explicit authorization.
+Preserve backward compatibility wherever possible.
+PHASE 9 — MAXIMUM PRACTICAL SECURITY AUDIT
+Perform a threat-oriented security assessment.
+Inspect:
+Authentication bypass.
+Broken access control.
+IDOR vulnerabilities.
+SQL injection.
+XSS.
+CSRF.
+SSRF.
+Open redirects.
+Insecure file uploads.
+Secret exposure.
+API abuse.
+Rate limiting.
+Session security.
+Token validation.
+Webhook verification.
+Sensitive data leakage.
+Unsafe dependencies.
+Firebase Security Rules.
+Database permissions.
+Production configuration.
+Apply appropriate defenses based on the actual architecture.
+Do not claim absolute security.
+Clearly distinguish between vulnerabilities tested, vulnerabilities fixed, and risks that remain.
+Never print actual secrets in the final report.
+PHASE 10 — FRONTEND & USER EXPERIENCE RECONSTRUCTION
+Inspect every screen and interactive component.
+Verify:
+Every button.
+Every link.
+Every form.
+Every dropdown.
+Every modal.
+Every navigation route.
+Every loading state.
+Every empty state.
+Every error state.
+Every success state.
+Responsive layouts.
+Mobile usability.
+Accessibility.
+Animation behavior.
+Visual consistency.
+Remove dead controls and misleading interactions.
+Fix broken layouts, visual inconsistencies, unnecessary complexity, and confusing user flows.
+Preserve Spark's existing premium visual identity.
+Do not redesign working components without a clear functional or usability benefit.
+PHASE 11 — PERFORMANCE & RELIABILITY
+Investigate:
+Initial loading performance.
+Bundle size.
+Unnecessary rendering.
+API latency.
+Database query efficiency.
+Image optimization.
+Caching.
+Concurrent requests.
+Memory consumption.
+Error recovery.
+External API failure handling.
+Background task reliability.
+Optimize actual bottlenecks rather than making unsupported performance claims.
+Do not introduce caching that causes stale prices, incorrect payment states, or outdated coupon information.
+PHASE 12 — AUTOMATED TESTING & REAL EXECUTION
+Run the strongest available verification suite.
+At minimum:
+Dependency installation verification.
+TypeScript compilation.
+Linting.
+Production build.
+Unit tests.
+Integration tests.
+API tests.
+Authentication tests.
+Payment lifecycle tests.
+Database tests.
+AI tool execution tests.
+Product discovery tests.
+Coupon integration tests.
+Security tests.
+Critical user journey tests.
+Use realistic test cases.
+Use sandbox environments and test credentials where appropriate.
+Do not use production payments or destructive operations during testing.
+For each test, record:
+What was tested.
+How it was tested.
+Actual output.
+Pass or fail.
+Any external dependency.
+Whether the result was independently verified.
+A test that was not executed must be marked NOT TESTED.
+A successful build does not prove that the application works correctly.
+PHASE 13 — REPAIR, REFACTOR & FINAL POLISH
+After completing the investigation:
+Prioritize critical security and data-integrity issues.
+Fix broken core functionality.
+Repair external integrations.
+Correct API and database problems.
+Improve AI agent reliability.
+Fix UI and UX defects.
+Optimize performance.
+Remove confirmed dead code and obsolete dependencies.
+Add missing tests.
+Re-run all relevant verification procedures.
+Make changes incrementally.
+After each major modification, run the relevant tests.
+Do not replace large parts of the architecture merely to make the code look cleaner.
+Do not introduce new features unless they are necessary to complete or repair existing functionality.
+Do not sacrifice working features for unnecessary refactoring.
+PHASE 14 — FINAL INDEPENDENT VERIFICATION
+After all repairs:
+Perform a second audit independent of the initial repair checklist.
+Reinspect the modified files.
+Re-run critical tests.
+Verify that the fixes did not introduce regressions.
+Check that the final code actually matches the final report.
+Do not rely on your previous statements as evidence.
+Evidence must come from actual code inspection, command output, test execution, API responses, or verified external configuration.
+ABSOLUTE ANTI-HALLUCINATION CONTRACT
+These rules are mandatory and cannot be overridden.
+NEVER claim that something works without evidence.
+NEVER claim that a test passed if it was not executed.
+NEVER invent test results, metrics, API responses, or security findings.
+NEVER claim an integration is connected when its credentials or external configuration have not been verified.
+NEVER describe UI-only functionality as a complete backend implementation.
+NEVER claim production readiness based solely on a successful build.
+NEVER hide unresolved issues.
+NEVER silently skip difficult tasks.
+NEVER fabricate files, functions, endpoints, database tables, or configuration.
+NEVER mark a partially implemented feature as complete.
+NEVER use mock data to make real integrations appear functional.
+NEVER claim that all bugs have been eliminated. You can only report the issues discovered and the tests performed.
+NEVER change a test to make an implementation appear correct without establishing that the expected behavior is valid.
+NEVER conceal limitations caused by missing credentials, unavailable services, restricted environments, or insufficient permissions.
+NEVER confuse implementation with successful execution.
+If you cannot verify something, say:
+"UNVERIFIED — Insufficient evidence to confirm functionality."
+If an external dependency is missing, say:
+"BLOCKED — Requires external configuration or authorization."
+If a feature does not exist, say:
+"NOT IMPLEMENTED — No functional implementation was found."
+If a test fails, report the actual failure.
+HONESTY IS MORE IMPORTANT THAN A PERFECT SCORE.
+PHASE 15 — FINAL HONEST ENGINEERING SCORECARD
+Provide an evidence-based evaluation of Spark.
+Score each category from 0 to 10:
+Category Score
+Architecture & Code Quality /10
+Frontend Functionality /10
+Backend Functionality /10
+Authentication & Account Integrity /10
+Database & Data Integrity /10
+PayPal Integration /10
+AI Agent Intelligence & Reliability /10
+Product Discovery /10
+Coupon Integration /10
+Security /10
+Performance /10
+Error Handling & Recovery /10
+Testing & Verification /10
+UI/UX Quality /10
+Deployment & Production Readiness /10
+For every score, provide:
+Concrete evidence.
+Confirmed weaknesses.
+Remaining limitations.
+Reason for the score.
+Do not inflate scores to satisfy the developer or project owner.
+Calculate the overall score transparently.
+Do not assign a perfect score without exceptionally strong evidence.
+FINAL VERDICT
+Choose exactly one:
+NOT READY — Critical functionality or security issues remain.
+DEVELOPMENT READY — Core architecture exists, but important work remains.
+BETA READY — Core workflows have been verified, with known limitations.
+SUBMISSION READY — Required hackathon functionality has been verified, and no known critical blockers remain.
+PRODUCTION READY — Production requirements, integrations, security controls, operational procedures, and critical user journeys have been verified.
+Explain why.
+Submission readiness and production readiness are different standards.
+REQUIRED FINAL REPORT
+Deliver the report in this exact order:
+Executive Summary.
+Actual Architecture Assessment.
+Complete Feature Inventory.
+Critical Bugs Discovered.
+Bugs Fixed.
+Remaining Bugs.
+Security Findings.
+Authentication Assessment.
+PayPal Assessment.
+AI Agent Assessment.
+Product Discovery & Feedico Assessment.
+Database Integrity Assessment.
+UI/UX Assessment.
+Performance Assessment.
+Test Execution Results.
+External Dependencies and Missing Configuration.
+Files Modified.
+Known Limitations.
+Full Engineering Scorecard.
+Final Verdict.
+Recommended Remaining Actions.
+For every unresolved issue, specify its severity:
+P0 — Critical security, payment, or data-integrity issue.
+P1 — Major functionality broken.
+P2 — Significant defect or reliability issue.
+P3 — Minor defect or polish.
+FINAL COMMAND
+Do not stop at analysis.
+Investigate, implement, repair, test, verify, and evaluate.
+Your mission is to deliver the strongest technically justified version of the existing Spark application.
+Do not optimize the report to make Spark look impressive. Optimize the actual product until the evidence justifies an impressive report.
+The final evaluation must describe the real state of the codebase, not the state we hope it has achieved.
+Gemini 4 Argon
+Ran for 0s
+error
+Quota limits exceeded
+SPARK — COMPLETE PLATFORM IMPLEMENTATION MASTER PROMPT
+Act as a principal software architect, AI engineer, database architect, payment infrastructure specialist, and senior full-stack developer.
+Your mission is to transform the existing Spark application into a fully functional, secure, scalable AI-powered shopping and product intelligence platform.
+Do not build a new application from scratch. Inspect and improve the existing repository while preserving all working functionality.
+1. OFFICIAL HACKATHON INTEGRATIONS
+Integrate and verify exactly these three sponsor technologies:
+A. Channel3 — Existing Integration
+Preserve the existing Channel3 integration.
+Use it for:
+Real product discovery.
+Product search.
+Product lookup and enrichment.
+Product images and metadata.
+Merchant offers and pricing.
+Product source attribution.
+Monetizable product links where supported.
+Requirements:
+Verify actual API calls.
+Preserve working functionality.
+Prevent duplicate integrations.
+Store retrieved products in Spark's persistent database when users save them.
+Never fabricate products or prices.
+Do not assume Channel3 Checkout is available in the current API version. Verify its actual availability before implementing it.
+B. AG Grid / AG Studio — New Integration
+Integrate AG Grid and AG Studio as Spark's intelligent analytics workspace.
+Implement:
+Saved product dashboards.
+Product comparisons.
+Shopping history.
+Payment analytics.
+Coupon analytics.
+Estimated savings.
+Subscription analytics.
+AI usage monitoring.
+Customizable dashboards.
+Interactive charts and tables.
+Sorting and filtering.
+Persistent dashboard preferences.
+Integrate the AG Studio Agent Framework where appropriate.
+Connect its agent capabilities to Spark's existing AI model infrastructure.
+Every statistic must come from actual user-specific database records.
+Verify licensing and appropriate deployment configuration.
+C. APIMatic — PayPal API Context Plugin
+Use the official APIMatic PayPal Context Plugin during development with Claude.
+Official installation command:
+npx context-plugins install paypal
+Use its official PayPal API context to improve:
+PayPal Orders API.
+Payment approval and capture.
+Subscription API.
+OAuth authentication.
+Webhook verification.
+Refund handling.
+Error handling.
+Sandbox and Live environments.
+Automated integration tests.
+This is a development-time coding-agent integration, not a customer-facing payment service.
+Do not install it as a runtime dependency unless an independent technical requirement exists.
+2. THREE PREMIUM SUBSCRIPTION PLANS
+Implement three real subscription tiers.
+All prices and limits must be centrally configurable.
+LUNA — Essential Intelligence
+Price: $9.99/month.
+Preferred AI model:
+gpt-6-luna
+Verify the model ID against the actual unified model API.
+Monthly usage:
+120 product searches.
+30 advanced product analyses.
+40 coupon checks.
+20 AI agent workflows.
+1 concurrent AI agent workflow.
+Features:
+Intelligent product discovery.
+Product comparisons.
+Product summaries.
+Basic coupon discovery.
+Saved products.
+Personal shopping lists.
+Conversation history.
+Standard AI recommendations.
+TERRA — Advanced Intelligence
+Price: $19.99/month.
+Preferred AI model:
+gpt-6.1-terra
+Verify the model ID against the actual unified model API.
+Monthly usage:
+600 product searches.
+150 advanced product analyses.
+200 coupon checks.
+100 AI agent workflows.
+3 concurrent AI agent workflows.
+Features:
+Everything in Luna, plus:
+Advanced product research.
+Multi-source product comparison.
+Better purchasing recommendations.
+Advanced coupon and price analysis.
+Product watchlists.
+Intelligent alerts.
+Enhanced research workflows.
+Advanced agent tool usage.
+SOL — Premium Intelligence
+Price: $39.99/month.
+Preferred AI model:
+gpt-6.1-sol
+Verify the model ID against the actual unified model API.
+Monthly usage:
+2,500 product searches.
+700 advanced product analyses.
+1,000 coupon checks.
+350 AI agent workflows.
+5 concurrent AI agent workflows.
+Features:
+Everything in Terra, plus:
+Advanced multi-agent orchestration.
+Deep product research.
+Parallel product discovery.
+Advanced purchasing decision intelligence.
+Complex product requirements.
+Advanced price and coupon evaluation.
+Personalized recommendations.
+Advanced analytics workspace.
+Priority agent workflow execution.
+IMPORTANT:
+These are proposed initial commercial limits.
+Do not confuse subscription quotas with provider API token limits.
+Verify model availability before activation.
+Do not advertise features that are not implemented.
+Do not impose artificial restrictions on users' access to their own saved data when their plan expires.
+3. CENTRALIZED USAGE AND QUOTA ENGINE
+Build a real backend-enforced subscription usage system.
+Track:
+Product searches.
+Advanced analyses.
+Coupon checks.
+Agent workflows.
+Concurrent workflows.
+Input and output tokens.
+Actual provider costs where available.
+Requirements:
+Enforce all limits on the server.
+Use the authenticated user's subscription.
+Prevent client-side quota manipulation.
+Use atomic quota reservations.
+Prevent concurrent usage from exceeding limits.
+Handle failed requests correctly.
+Prevent duplicate usage recording.
+Reset allowances according to the verified subscription billing period.
+Store usage history.
+Display accurate remaining allowances.
+Dashboard:
+Current subscription.
+Monthly allowance.
+Used quota.
+Remaining quota.
+Usage percentage.
+Billing cycle.
+Next renewal.
+Upgrade options.
+4. REAL PAYPAL SUBSCRIPTION SYSTEM
+Integrate Spark subscriptions with PayPal while preserving the existing product checkout.
+These are separate financial flows:
+A. Spark subscription payments.
+B. Product purchasing payments.
+Implement:
+Luna, Terra, and Sol billing products.
+Monthly plans.
+Subscription creation.
+PayPal approval.
+Server-side verification.
+Activation after verified payment.
+Subscription management.
+Upgrade and downgrade.
+Cancellation.
+Failed renewal handling.
+Payment history.
+Webhook processing.
+Refund and reversal handling.
+Use the official PayPal Subscriptions API only after verifying merchant eligibility.
+If recurring billing is unavailable:
+Do not simulate subscriptions.
+Do not pretend one-time payments automatically renew.
+Report the required PayPal account configuration.
+Implement an explicitly identified supported alternative.
+Security:
+Never store PayPal passwords.
+Protect all secrets.
+Verify webhook signatures.
+Implement idempotency.
+Never activate a paid plan from a browser redirect alone.
+Keep Sandbox and Live environments separate.
+Do not break existing Spark shopping payments.
+5. REAL PERSISTENT USER DATABASE
+Inspect the existing database.
+Reuse a functioning persistent database if available.
+Otherwise, implement PostgreSQL using a suitable managed provider.
+The database must persist:
+User profiles.
+Preferences.
+Subscriptions.
+Payment records.
+Usage records.
+Saved products.
+Search history.
+Product comparisons.
+Shopping lists.
+Saved coupons.
+Price alerts.
+Agent conversations.
+Messages.
+Workflow history.
+Dashboard configurations.
+Account activity.
+Requirements:
+Permanent storage.
+User-specific data isolation.
+Database migrations.
+Foreign keys and indexes.
+Secure authorization.
+Pagination.
+Data export.
+User-requested data deletion.
+Recovery after logout and login.
+Persistence across deployment restarts.
+Preserve Firebase Authentication if it already works.
+Verify Firebase ID tokens on the backend.
+Never trust a user ID supplied by the frontend.
+Use Row Level Security if using Supabase PostgreSQL.
+The primary database must be the source of truth.
+6. PREMIUM SPARK INTERFACE
+Maintain Spark's existing dark luxury and iOS-inspired visual identity.
+Create:
+Subscription plans page.
+Plan comparison.
+Account billing section.
+Usage dashboard.
+Saved products workspace.
+AG Grid analytics.
+Payment history.
+AI activity history.
+Subscription management.
+Display the three plans clearly with their real prices and capabilities.
+Show current plan and remaining quotas.
+Use smooth animations, responsive layouts, premium typography, and consistent loading and error states.
+Never display fake statistics or fictional payment confirmations.
+7. SECURITY
+Perform a complete security audit.
+Verify:
+Authentication.
+Authorization.
+Cross-user data isolation.
+API key security.
+Payment integrity.
+Webhook validation.
+Quota enforcement.
+SQL injection prevention.
+XSS protection.
+CSRF protection where applicable.
+Rate limiting.
+Concurrent request safety.
+Subscription manipulation prevention.
+Secure logging.
+Database access controls.
+Do not expose secrets in frontend code.
+8. AUTOMATED TESTING
+Test:
+Subscription plans:
+Luna activation.
+Terra activation.
+Sol activation.
+Upgrade.
+Downgrade.
+Cancellation.
+Expiration.
+Failed renewal.
+Usage:
+Exact limits.
+Quota exhaustion.
+Concurrent requests.
+Failed workflows.
+Monthly reset.
+Client manipulation attempts.
+Payments:
+PayPal Sandbox approval.
+Successful payment.
+Failed payment.
+Invalid webhook.
+Duplicate webhook.
+Refund.
+Reversal.
+Database:
+Data persistence.
+Login restoration.
+Multiple user isolation.
+Migrations.
+Data export and deletion.
+Integrations:
+Channel3 actual API requests.
+AG Grid actual database data.
+AG Studio agent functionality.
+APIMatic PayPal development context.
+Run the actual application build, type checking, linting, and relevant tests.
+9. FINAL ENGINEERING REPORT
+After implementation, provide an honest report.
+Include:
+Architecture changes.
+Three sponsor integrations and their verified status.
+Three subscription plans.
+Model identifiers and availability.
+Usage enforcement.
+PayPal subscription eligibility.
+Existing shopping payment compatibility.
+Database persistence.
+Security audit.
+Test results.
+Deployment status.
+Remaining manual configuration.
+Classify every feature:
+VERIFIED WORKING
+IMPLEMENTED BUT NOT VERIFIED
+PARTIALLY IMPLEMENTED
+BLOCKED BY EXTERNAL CONFIGURATION
+NOT IMPLEMENTED
+Provide evidence for every verified claim.
+Give a realistic score out of 100 based on actual implementation and testing.
+FINAL EXECUTION DIRECTIVE
+Do not stop after writing a plan.
+Inspect the repository, implement the features, run migrations, integrate services, test the actual application, and report the results.
+Preserve all existing working functionality.
+Never invent successful integrations, payment events, product data, or test results.
+The final objective is a fully functional Spark platform combining intelligent shopping, three premium AI subscription tiers, PayPal payments, real persistent user accounts, and interactive analytics.

@@ -1,0 +1,32 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:0f3acd86-92ff-4a5e-93c6-4d35f28f2262",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-01T00:35:00Z",
+    "component": {
+      "type": "application",
+      "name": "spark-intelligent-shopping-platform",
+      "version": "1.0.0",
+      "description": "Spark AI-powered global product discovery, coupon discovery, and PayPal-powered purchasing platform"
+    }
+  },
+  "components": [
+    { "type": "library", "name": "@google/genai", "version": "^2.4.0", "purl": "pkg:npm/%40google/genai@2.4.0", "scope": "required" },
+    { "type": "library", "name": "@tailwindcss/vite", "version": "^4.3.3", "purl": "pkg:npm/%40tailwindcss/vite@4.3.3", "scope": "required" },
+    { "type": "library", "name": "@vitejs/plugin-react", "version": "^6.1.1", "purl": "pkg:npm/%40vitejs/plugin-react@6.1.1", "scope": "required" },
+    { "type": "library", "name": "dotenv", "version": "^17.2.3", "purl": "pkg:npm/dotenv@17.2.3", "scope": "required" },
+    { "type": "library", "name": "express", "version": "^4.21.2", "purl": "pkg:npm/express@4.21.2", "scope": "required" },
+    { "type": "library", "name": "firebase", "version": "^13.1.0", "purl": "pkg:npm/firebase@13.1.0", "scope": "required" },
+    { "type": "library", "name": "lucide-react", "version": "^0.546.0", "purl": "pkg:npm/lucide-react@0.546.0", "scope": "required" },
+    { "type": "library", "name": "motion", "version": "^12.23.24", "purl": "pkg:npm/motion@12.23.24", "scope": "required" },
+    { "type": "library", "name": "react", "version": "^19.0.1", "purl": "pkg:npm/react@19.0.1", "scope": "required" },
+    { "type": "library", "name": "react-dom", "version": "^19.0.1", "purl": "pkg:npm/react-dom@19.0.1", "scope": "required" },
+    { "type": "library", "name": "vite", "version": "^8.3.0", "purl": "pkg:npm/vite@8.3.0", "scope": "required" },
+    { "type": "library", "name": "@firebase/eslint-plugin-security-rules", "version": "^0.0.2", "purl": "pkg:npm/%40firebase/eslint-plugin-security-rules@0.0.2", "scope": "optional" },
+    { "type": "library", "name": "eslint", "version": "^10.13.0", "purl": "pkg:npm/eslint@10.13.0", "scope": "optional" },
+    { "type": "library", "name": "tsx", "version": "^4.21.0", "purl": "pkg:npm/tsx@4.21.0", "scope": "optional" },
+    { "type": "library", "name": "typescript", "version": "^7.0.2", "purl": "pkg:npm/typescript@7.0.2", "scope": "optional" }
+  ]
+}

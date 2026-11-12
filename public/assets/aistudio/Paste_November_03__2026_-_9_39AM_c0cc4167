@@ -1,0 +1,933 @@
+# SPARK — INTELLIGENCE UPGRADE, 7-AGENT VERIFICATION, PRODUCT RESEARCH ENGINE, GEMINI LIVE VOICE & PAYPAL ACCOUNT INTEGRATION
+
+## YOUR ROLE
+
+Act as a Principal AI Systems Architect, Multi-Agent Engineer, E-commerce Intelligence Specialist, Senior Full-Stack Engineer, Product Research Analyst, and Quality Assurance Lead.
+
+You are working on Spark, an autonomous AI-powered product discovery and purchasing platform.
+
+Your task is to significantly upgrade the intelligence, specialization, product knowledge, decision-making, and real-world execution capabilities of Spark.
+
+This is an implementation assignment. You must inspect the existing codebase, understand the current architecture, make actual improvements, and verify that they work.
+
+Do not simply create another layer of prompts around an existing weak system.
+
+The objective is to make Spark behave like a highly competent professional product research and purchasing advisor rather than a generic AI chatbot.
+
+---
+
+# PHASE 1 — AUDIT THE EXISTING 7-AGENT ARCHITECTURE
+
+Spark already has an autonomous 7-agent system.
+
+Do not assume that the agents are working merely because the application displays their names or reports that they completed an analysis.
+
+Investigate the actual implementation of all seven agents.
+
+For EACH agent, verify:
+
+1. Its actual implementation and execution entry point.
+2. Its assigned responsibility and specialization.
+3. Its configured AI model.
+4. Its system instructions.
+5. Its access to tools and external data.
+6. Its input and output schemas.
+7. Its communication with the orchestrator.
+8. Its ability to pass useful results to downstream agents.
+9. Its error-handling and retry mechanisms.
+10. Whether its output actually influences the final recommendation.
+
+### Verify real execution
+
+Implement reliable agent observability.
+
+Each agent execution must have:
+
+- Unique execution ID.
+- Agent identity.
+- Task received.
+- Input validation status.
+- Model invocation status.
+- Tool execution results.
+- Execution timestamp.
+- Duration.
+- Structured output.
+- Validation result.
+- Error details when applicable.
+- Downstream handoff status.
+
+Distinguish between:
+
+- Agent initialized.
+- Agent invoked.
+- Model successfully responded.
+- Agent completed its assigned task.
+- Agent output successfully consumed.
+
+These are different states.
+
+An initialized agent is not a working agent.
+
+A successful model response does not automatically mean its assigned task was completed correctly.
+
+Never report that seven agents successfully analyzed a product unless their real executions and outputs prove it.
+
+### Seven specialized responsibilities
+
+Preserve the existing seven agents and their established identities where possible.
+
+Ensure that their responsibilities collectively cover these capabilities:
+
+**Agent 1 — Intent & Requirements Intelligence**
+
+Understands the actual shopping request.
+
+Extracts:
+- Product category.
+- Intended use.
+- Budget.
+- Country and purchasing region.
+- Quality expectations.
+- Performance requirements.
+- Brand preferences.
+- New versus refurbished preference.
+- Important constraints.
+
+It must identify ambiguous product categories instead of mixing unrelated products.
+
+For example, when a customer searches for smartphones, do not return cordless landline phones.
+
+**Agent 2 — Global Product Discovery**
+
+Searches Channel3 Product Graph API and other authorized connected sources.
+
+Finds relevant products, actual merchant offers, comparable alternatives, and useful availability information.
+
+It must optimize for product relevance and quality, not the number of records retrieved.
+
+**Agent 3 — Product Identity & Catalog Intelligence**
+
+Normalizes product records.
+
+Identifies:
+- Exact manufacturer.
+- Model.
+- Model number.
+- Generation.
+- Variant.
+- Storage or configuration.
+- Release generation.
+- Regional variant.
+
+Detects duplicate products listed by multiple merchants.
+
+Never confuse two different configurations of the same product family.
+
+**Agent 4 — Technical Product Research**
+
+Researches the actual technical characteristics of each candidate.
+
+Prioritizes:
+1. Official manufacturer documentation.
+2. Official technical specifications.
+3. Credible independent technical reviews.
+4. Reliable retailer specifications when manufacturer information is unavailable.
+
+Its responsibility is to understand what the product actually offers, not simply repeat merchant descriptions.
+
+**Agent 5 — Quality & Reputation Intelligence**
+
+Evaluates product quality and reliability.
+
+Investigates:
+- Independent reviews.
+- Customer feedback.
+- Rating count.
+- Review recency.
+- Common complaints.
+- Known defects.
+- Long-term reliability.
+- Software and security support where relevant.
+- Warranty and service coverage.
+
+Distinguishes manufacturer claims from independently verified findings.
+
+Do not treat a rating of 4.8 from three reviews as equivalent to thousands of independent customer ratings.
+
+**Agent 6 — Pricing & Value Intelligence**
+
+Compares equivalent product configurations across merchants.
+
+Calculates:
+- Actual listed price.
+- Currency.
+- Shipping cost when available.
+- Applicable verified discounts.
+- Taxes when known.
+- Estimated or confirmed final purchase cost.
+- Price differences between merchants.
+- Quality-adjusted value.
+
+Never declare an offer the cheapest based on incomplete pricing information.
+
+**Agent 7 — Independent Verification & Decision Intelligence**
+
+Acts as the final critical evaluator.
+
+It must challenge the outputs of the other agents.
+
+Checks:
+- Whether the product matches the original request.
+- Whether technical claims have evidence.
+- Whether pricing is comparable.
+- Whether product data is current.
+- Whether reviews are credible.
+- Whether the product is outdated or discontinued.
+- Whether a cheaper product is genuinely a good alternative.
+- Whether the final ranking is logically justified.
+
+It rejects weak, irrelevant, unsupported, or misleading candidates.
+
+The final response must be based on verified agent outputs rather than fabricated summaries.
+
+---
+
+# PHASE 2 — BUILD A MUCH SMARTER PRODUCT SELECTION ENGINE
+
+This is one of the highest-priority improvements.
+
+Spark must understand the difference between:
+
+- Cheap products.
+- Good budget products.
+- High-value products.
+- Premium products.
+- Products with excellent specifications but poor reliability.
+- Products that are outdated despite being inexpensive.
+
+A low price must never automatically make a product a good recommendation.
+
+## Core rule
+
+When users ask for the best product at a reasonable price, Spark must find the best balance between quality, performance, reliability, features, and total cost.
+
+It must NOT simply return the cheapest matching item.
+
+### Example of incorrect behavior
+
+A user searches:
+
+"Find me the best smartphones for 2027 at a reasonable price."
+
+The system must not recommend an old Nokia 2780 Flip Phone simply because it is inexpensive.
+
+It must not return an office cordless phone from a business-supply merchant.
+
+It must identify the intended category, evaluate modern relevant smartphones, and prioritize competitive products with strong real-world capabilities.
+
+An older product may still be recommended when the user explicitly requests an older generation, basic phone, retro phone, or a specific use case.
+
+### Product eligibility filters
+
+Before ranking products, implement intelligent eligibility checks.
+
+Evaluate:
+
+- Category relevance.
+- Product generation.
+- Release date.
+- Current market availability.
+- Manufacturer support status.
+- Discontinued status.
+- Product condition.
+- Exact configuration.
+- Technical quality.
+- Evidence availability.
+- Merchant reliability.
+
+Reject candidates that are:
+- From the wrong category.
+- Clearly obsolete for the requested use case.
+- Unnecessarily outdated.
+- Unrelated to the actual intent.
+- Misleadingly described.
+- Unavailable when current availability is essential.
+- Unsupported by meaningful product information.
+
+Do not automatically exclude older products if they remain genuinely competitive or the user specifically requests them.
+
+### Quality-adjusted ranking
+
+Implement a dynamic product scoring framework.
+
+Use these initial scoring dimensions:
+
+| Dimension | Weight |
+|---|---:|
+| Relevance to user's requirements | 25% |
+| Technical quality and performance | 20% |
+| Reliability and review evidence | 15% |
+| Price-to-performance value | 20% |
+| Product generation and support longevity | 10% |
+| Merchant availability and offer reliability | 10% |
+
+Total: 100%.
+
+These weights are starting defaults, not universal rules.
+
+Adapt them according to product category and user intent.
+
+For example:
+- Smartphones: performance, battery, cameras, display, software support.
+- Laptops: CPU, GPU, RAM, storage, thermal performance, display.
+- Headphones: sound quality, ANC, comfort, codec support, battery.
+- Monitors: panel technology, refresh rate, color accuracy, resolution.
+- Appliances: efficiency, durability, capacity, serviceability.
+
+Apply minimum quality requirements before considering price.
+
+A product that fails essential quality requirements must not reach the top of the ranking merely because it is cheaper.
+
+### Ranking output
+
+Where sufficient evidence exists, produce distinct recommendations:
+
+1. Best Overall — strongest combined quality and value.
+2. Best Value — excellent capabilities for its price.
+3. Best Budget — lowest price that still meets meaningful quality standards.
+4. Best Premium — strongest high-end option.
+5. Best Alternative — a genuinely competitive alternative.
+
+Do not invent five recommendations when the available evidence supports fewer.
+
+---
+
+# PHASE 3 — SIGNIFICANTLY EXPAND PRODUCT DETAILS
+
+Currently, the system sometimes returns a product name, merchant, price, and a shallow description.
+
+That is insufficient.
+
+Each recommended product must have a much richer information profile.
+
+### Product identity
+
+Retrieve and normalize:
+
+- Full official product name.
+- Brand.
+- Exact model number.
+- Product category.
+- Generation.
+- Release year.
+- Regional version.
+- Variant.
+- Product condition.
+- Official manufacturer page.
+- Main product image.
+
+### Technical specifications
+
+Retrieve relevant technical details dynamically based on category.
+
+For smartphones, for example:
+
+- Processor and chipset.
+- RAM.
+- Internal storage.
+- Display type.
+- Display size.
+- Resolution.
+- Refresh rate.
+- Peak brightness when documented.
+- Main camera sensors.
+- Optical image stabilization.
+- Battery capacity.
+- Charging speed.
+- Wireless charging support.
+- Operating system.
+- Expected software support.
+- Connectivity.
+- 5G band compatibility where known.
+- Water and dust resistance.
+- Dimensions and weight.
+- Build materials.
+
+For laptops, research CPU, GPU, memory configuration, storage, screen, thermal design, battery, ports, and upgradeability.
+
+For every other category, build an appropriate category-specific specification profile.
+
+Do not display irrelevant technical fields simply to make a product card look larger.
+
+### Real-world benefits
+
+Convert technical specifications into understandable purchasing insights.
+
+Do not only say:
+
+"Has 12 GB RAM."
+
+Explain what that means for multitasking and demanding applications, when supported by the hardware and software context.
+
+For every product, explain:
+
+- What makes it good.
+- Its strongest features.
+- Its practical advantages.
+- Its limitations.
+- Its competitive advantages.
+- Its weaknesses.
+- Who should buy it.
+- Who should avoid it.
+- What alternatives may be more suitable.
+
+### Review intelligence
+
+Display:
+
+- Actual rating.
+- Number of customer ratings.
+- Review source.
+- Independent expert-review evidence.
+- Common positive feedback.
+- Common negative feedback.
+- Review recency when available.
+
+Do not invent customer sentiment or convert missing review data into a positive evaluation.
+
+### Pricing intelligence
+
+Show:
+
+- Merchant name.
+- Exact product variant being sold.
+- Listed price.
+- Currency.
+- Shipping information when available.
+- Verified coupon or promotion.
+- Taxes when available.
+- Final total only when all relevant components are known.
+
+When final costs are unknown, clearly identify which components are missing.
+
+Never fabricate a final checkout total.
+
+### Product evidence
+
+Each important specification must have a traceable source.
+
+Distinguish between:
+- Official manufacturer specifications.
+- Channel3 product catalog records.
+- Merchant offer information.
+- Independent expert reviews.
+- Customer ratings.
+- Estimated or unavailable fields.
+
+Do not use a generic label such as "Verified Channel3 Source" as a substitute for meaningful evidence.
+
+For example, explain that the product's processor was confirmed from the manufacturer's specifications, while the displayed merchant price came from a specific current Channel3 offer.
+
+**A Channel3 product graph record does not automatically verify every technical specification, customer review, or availability claim.**
+
+---
+
+# PHASE 4 — IMPROVE CHANNEL3 AND EXTERNAL RESEARCH
+
+Preserve the existing Channel3 Product Graph API integration.
+
+Investigate whether the system extracts all useful information actually available from the API.
+
+Optimize:
+
+- Product discovery.
+- Product entity matching.
+- Merchant offer retrieval.
+- Exact variant identification.
+- Duplicate removal.
+- Price comparison.
+- Availability information.
+- Source attribution.
+- Data freshness.
+
+Separate the canonical product from its individual merchant offers.
+
+One product listed by eleven merchants is still one product with eleven offers, not eleven different products.
+
+### Multi-source research
+
+Where authorized and technically supported, combine:
+
+1. Channel3 Product Graph API.
+2. Official manufacturer websites.
+3. Reputable technical review sources.
+4. Authorized merchant listings.
+5. Verified promotional feeds.
+
+Use each source for the information it is qualified to establish.
+
+If one source fails, attempt a relevant fallback source.
+
+For example:
+
+- If Channel3 returns products but an external research source is unavailable, retain the useful catalog results and explain the evidence limitation.
+- If an official manufacturer page is unavailable, do not silently invent technical specifications.
+- If prices differ between merchants, preserve the individual offers and their timestamps.
+
+Avoid the unhelpful generic final output:
+
+"Live search failed. Coupon validity unknown. Checkout unsupported."
+
+Instead, explain exactly which product facts were retrieved, what information remains unavailable, and which conclusions are still reliable.
+
+Do not pretend that a missing source succeeded.
+
+---
+
+# PHASE 5 — MAKE SPARK'S ANSWERS SIGNIFICANTLY SMARTER
+
+Spark must stop producing generic, repetitive, superficial AI responses.
+
+It must respond like a knowledgeable specialist who understands both products and purchasing decisions.
+
+### Response intelligence
+
+Before generating a final answer, the system must understand:
+
+- What the user actually wants.
+- Why the user wants it.
+- What quality level is appropriate.
+- What compromises are acceptable.
+- Which products are genuinely competitive.
+- Which technical characteristics matter most.
+- Whether the evidence supports a confident recommendation.
+
+### Response structure
+
+A strong product recommendation should generally contain:
+
+1. A clear purchasing verdict.
+2. Why the product deserves consideration.
+3. Important technical specifications.
+4. Practical benefits.
+5. Important limitations.
+6. Independent review evidence where available.
+7. Real price and merchant offers.
+8. Comparison with relevant alternatives.
+9. A clear explanation of why the recommendation offers good value.
+
+Avoid excessive technical details that do not influence the purchase decision.
+
+### Example of the desired response quality
+
+User:
+
+"Find me a good smartphone at a reasonable price."
+
+Weak response:
+
+"Found 11 verified records. The best match costs $151.39. Four alternatives identified."
+
+Desired response style:
+
+"I prioritized current smartphones that provide strong everyday performance without sacrificing camera quality, battery life, or software support to save a small amount.
+
+The leading candidate is [actual product and exact configuration].
+
+Why it stands out:
+- [Verified processor and meaningful performance implications].
+- [Display characteristics and their practical benefits].
+- [Battery and charging characteristics].
+- [Camera capabilities supported by actual reviews].
+- [Software-support information].
+
+Main compromise:
+[The most important documented limitation].
+
+Value assessment:
+[Actual price, competing merchant offers, and why the price is justified].
+
+Alternative:
+[Another genuinely competitive product, with a clear comparison explaining who should choose it instead]."
+
+This is a response-quality example, not a request to fabricate these facts or recommend a particular model.
+
+### Avoid generic AI behavior
+
+Never:
+- Repeat the user's question without adding value.
+- Use vague statements such as "excellent product" without evidence.
+- Automatically recommend the cheapest product.
+- Present source retrieval as proof of product quality.
+- Generate unsupported technical details.
+- Produce inflated claims about agent capabilities.
+- Give long technical descriptions that never lead to a useful recommendation.
+
+Adapt answer depth to the complexity of the request.
+
+---
+
+# PHASE 6 — REMOVE THE TWO UNWANTED APPLICATION SECTIONS
+
+Remove these visible sections from the Spark application:
+
+1. PayPal Sandbox.
+2. Spark Live Voice Mode.
+
+Inspect the navigation, settings, dashboard, cards, routes, and related UI elements.
+
+Remove the obsolete standalone sections and unnecessary duplicated interfaces.
+
+IMPORTANT:
+
+Removing the PayPal Sandbox section does NOT mean deleting the PayPal integration.
+
+Preserve:
+- PayPal account linking.
+- OAuth authentication.
+- Existing production payment functionality.
+- Order creation.
+- Payer approval.
+- Payment capture.
+- Transaction records.
+- Webhooks.
+- Existing security controls.
+
+Keep development-only Sandbox configuration in the appropriate secure environment configuration and testing infrastructure, not as an unnecessary application feature for normal users.
+
+Similarly, do not delete Spark's voice capabilities.
+
+Move the entire user-facing voice interaction into the search interface as described below.
+
+---
+
+# PHASE 7 — GEMINI LIVE VOICE INSIDE THE SEARCH BUBBLE
+
+Replace the standalone Spark Live Voice Mode interface with an integrated voice capability directly inside Spark's main search bubble.
+
+### User interaction
+
+The search input must contain a clearly identifiable microphone/voice button.
+
+When the user clicks it:
+
+1. Request microphone permission if required.
+2. Initialize an authenticated Gemini Live session.
+3. Activate audio capture.
+4. Begin real-time audio streaming.
+5. Allow the user to talk naturally.
+6. Stream spoken AI responses.
+7. Allow interruption while the AI is speaking.
+8. Support ending the session with a clear control.
+
+Clicking the voice icon again or explicitly pressing the end control must stop the current voice session safely.
+
+### Gemini Live API integration
+
+Use the actual Gemini Live API, not ordinary text-to-speech presented as live conversation.
+
+Investigate the current official model availability before implementation.
+
+The intended model reference supplied for investigation is:
+
+`gemini 3.5 lit`
+
+Do not assume that this identifier is a valid Live API model.
+
+Verify the exact model identifier, availability, supported modalities, and account permissions.
+
+The currently documented Google Live model to evaluate is:
+
+`gemini-3.8-live`
+
+If the requested 3.5 model is not supported by the actual Live API, use the supported stable Live model and report the model decision.
+
+Do not silently map an unsupported model ID to another one.
+
+### Voice capabilities
+
+Implement:
+
+- Real-time microphone input.
+- Real-time spoken responses.
+- Low-latency audio streaming.
+- Speech interruption.
+- Voice activity detection.
+- Natural conversational turn-taking.
+- Transcription when supported.
+- Multilingual conversation.
+- Conversation context.
+- Graceful reconnection.
+- Audio session termination.
+- Microphone permission handling.
+- Error recovery.
+
+Voice must work as an extension of the same Spark shopping assistant.
+
+A user should be able to say:
+
+"Find me the best smartphone under $500."
+
+Spark should understand, research real products through its existing agent system, and explain the recommendations naturally through voice.
+
+Voice interactions must use the same product knowledge, tools, and verified research pipeline as text conversations.
+
+Do not create a separate weak voice assistant with no access to Spark's existing capabilities.
+
+### Security
+
+- Keep permanent Google API credentials on the backend.
+- Prefer short-lived ephemeral credentials for supported client-to-server Live API sessions.
+- Validate session provisioning.
+- Enforce expiration.
+- Prevent unauthorized session creation.
+- Prevent credential exposure in frontend bundles.
+- Handle microphone permissions securely.
+
+### User interface
+
+The voice button must feel native to the existing search bubble.
+
+During voice activity, display appropriate states:
+
+- Idle.
+- Connecting.
+- Listening.
+- Processing.
+- Speaking.
+- Interrupted.
+- Reconnecting.
+- Error.
+
+Use subtle animation and clear visual feedback.
+
+Do not create another navigation section or separate voice dashboard.
+
+---
+
+# PHASE 8 — REAL PAYPAL BALANCE BESIDE THE USER PROFILE
+
+Display the actual connected PayPal account balance near the user's profile/avatar area in the sidebar.
+
+This must be the balance of the user's linked PayPal account, NOT a fabricated value and NOT an unrelated Spark internal balance.
+
+### Visibility rules
+
+- If the user has not linked PayPal, do not display a balance.
+- If the user has linked PayPal and the actual balance can be retrieved with the authorized permissions, display it.
+- If the account is disconnected, hide the balance.
+- If authorization is missing, do not fabricate a value.
+- If retrieval fails, show an appropriate unavailable state instead of a fake amount.
+
+### Data retrieval
+
+Investigate the official PayPal balance retrieval capabilities and determine whether the existing account-linking/OAuth permissions support retrieving the connected user's actual available balance.
+
+Evaluate the PayPal Reporting API and its balance retrieval endpoint where appropriate.
+
+Verify:
+- Correct account ownership.
+- Supported OAuth flow.
+- Required authorization scopes.
+- Whether the API supports the actual connected account context.
+- Multi-currency behavior.
+- Available versus total balance.
+- Data refresh timestamps.
+- Account type and regional restrictions.
+
+Do not assume that an application-level Client ID and Client Secret automatically grant access to every connected user's private balance.
+
+If the required access cannot be obtained through the existing integration, implement only what PayPal officially supports and report the exact missing authorization or capability.
+
+### Display requirements
+
+Display:
+
+- Actual available balance.
+- Currency code.
+- Last updated timestamp.
+
+Where multiple currencies are available, handle them without merging different currencies into a misleading single number.
+
+Distinguish available funds from pending or withheld funds.
+
+Do not label cached or delayed account data as real-time.
+
+Protect balance information with user-specific backend authorization.
+
+Never allow one authenticated user to retrieve another user's balance.
+
+---
+
+# PHASE 9 — ADVANCED QUALITY ASSURANCE
+
+Test the implementation through real execution, not merely code inspection.
+
+### Agent tests
+
+Test each of the seven agents individually.
+
+Verify that each agent:
+- Is invoked.
+- Receives valid inputs.
+- Executes its assigned task.
+- Uses the correct tools.
+- Returns a structured output.
+- Passes valid output downstream.
+
+Then test the complete orchestration pipeline with an actual product-search scenario.
+
+### Product evaluation test cases
+
+Use these scenarios:
+
+**Test A — Modern smartphones**
+
+Query: "Find the best smartphones for 2027 at a reasonable price."
+
+Expected:
+- Smartphone category only.
+- Relevant and competitive models.
+- No unrelated landline phones.
+- No obsolete budget devices simply because they are cheap.
+- Real technical specifications.
+- Evidence-based ranking.
+
+**Test B — Value versus cheapest**
+
+Query: "Find me the best laptop under $800."
+
+Expected:
+- Quality floor.
+- Appropriate processor and memory.
+- Performance and reliability assessment.
+- Meaningful price comparison.
+- No automatic cheapest-product recommendation.
+
+**Test C — Exact product comparison**
+
+Query: "Compare these two phone models."
+
+Expected:
+- Correct variants.
+- Verified specifications.
+- Meaningful advantages and disadvantages.
+- Actual price comparison.
+- Clear purchasing verdict.
+
+**Test D — Poor source availability**
+
+Simulate one external source failing.
+
+Expected:
+- Relevant fallback retrieval.
+- No fabricated evidence.
+- Transparent source limitations.
+- Continued useful research when possible.
+
+### Voice tests
+
+Verify:
+- Permission request.
+- Successful session provisioning.
+- Microphone capture.
+- Bidirectional audio.
+- Spoken response.
+- Interruptions.
+- Session termination.
+- Reconnection.
+- Security boundaries.
+
+### PayPal balance tests
+
+Verify:
+- Unlinked user: no balance displayed.
+- Linked user with authorization: actual available balance displayed.
+- Expired authorization: no fabricated balance.
+- API failure: graceful unavailable state.
+- Multiple currencies: handled correctly.
+- Cross-user access attempt: rejected.
+
+### Build and regression tests
+
+Execute all relevant:
+- Production build checks.
+- TypeScript validation.
+- Linting.
+- Unit tests.
+- Integration tests.
+- End-to-end tests.
+- API tests.
+- Agent execution tests.
+- Database authorization tests.
+
+Preserve existing working functionality.
+
+---
+
+# STRICT IMPLEMENTATION RULES
+
+1. Do not merely improve the system prompt while leaving the actual agent architecture broken.
+2. Do not simulate agent execution.
+3. Do not fabricate product specifications, ratings, prices, reviews, or availability.
+4. Do not recommend an inferior product solely because its price is low.
+5. Do not confuse product catalog entries with merchant offers.
+6. Do not claim that Channel3 verifies facts that it does not provide.
+7. Do not delete the existing Channel3 integration.
+8. Do not remove PayPal payment functionality when removing the PayPal Sandbox UI section.
+9. Do not replace Gemini Live with ordinary TTS.
+10. Do not expose Google or PayPal credentials.
+11. Do not display imaginary PayPal balances.
+12. Do not create fake successful test results.
+13. Do not unnecessarily rewrite stable application modules.
+14. Preserve existing database records and security policies.
+15. Do not finish with unresolved critical issues hidden behind generic success messages.
+
+---
+
+# FINAL DELIVERY REPORT
+
+At completion, provide:
+
+### 1. Seven-Agent System
+A table documenting every agent, its actual role, execution path, tools, and test results.
+
+### 2. Product Intelligence
+Explain the improvements to product discovery, quality filtering, product specifications, ranking, and value analysis.
+
+### 3. Product Research
+Show how Channel3 and other authorized sources are used, including evidence attribution and fallback behavior.
+
+### 4. Response Intelligence
+Explain the changes that make recommendations more specialized, detailed, relevant, and useful.
+
+### 5. Gemini Live
+Document the exact model ID, API integration, session security, audio features, and actual test results.
+
+### 6. PayPal Balance
+Document the source, permission scope, retrieval mechanism, currency handling, freshness, and UI visibility rules.
+
+### 7. UI Cleanup
+Confirm the standalone PayPal Sandbox and Spark Live Voice Mode sections have been removed while their required underlying functionality has been preserved.
+
+### 8. Testing
+Provide exact executed tests and their results.
+
+### 9. Remaining Limitations
+List any incomplete functionality, unavailable APIs, missing permissions, and external blockers.
+
+# ULTIMATE OBJECTIVE
+
+Transform Spark into an intelligent, specialized, evidence-driven shopping and purchasing agent.
+
+Spark should understand products deeply, investigate them intelligently, compare their real-world value, reject weak recommendations, and explain its decisions with professional-level knowledge.
+
+Its seven agents must be real, independently verifiable working components.
+
+Its voice interface must provide a natural real-time conversational experience.
+
+Its displayed PayPal balance must represent the actual linked account balance, never an invented figure.
+
+**Do not optimize Spark to return more products. Optimize it to make better purchasing decisions.**
+
+Implement the changes directly in the existing repository, validate them, and preserve every working feature that is not explicitly requested to be removed.

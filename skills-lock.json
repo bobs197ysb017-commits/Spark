@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "skills": {
+    "apimatic-portal": {
+      "source": "apimatic/skills",
+      "sourceType": "github",
+      "skillPath": "skills/apimatic-portal/SKILL.md",
+      "computedHash": "836fdffb38fe530066073f19edecc2fd586197ca950aac9b3e23a1653aa6bbbe"
+    },
+    "apimatic-sdk": {
+      "source": "apimatic/skills",
+      "sourceType": "github",
+      "skillPath": "skills/apimatic-sdk/SKILL.md",
+      "computedHash": "ce1f06c74f7dfcea83337e4d00adc7e411593c0173b974e3e5a75006e701e1ea"
+    }
+  }
+}
