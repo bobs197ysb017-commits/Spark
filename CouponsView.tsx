@@ -1,0 +1,793 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  Clock,
+  Copy,
+  ExternalLink,
+  Globe,
+  Loader2,
+  MousePointerClick,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Store,
+  Tag,
+  TicketPercent,
+} from 'lucide-react';
+import type {
+  CouponItem,
+  FeedicoAffiliateClickRecord,
+  FeedicoMerchantRecord,
+  FeedicoNormalizedOffer,
+  FeedicoStatusResponse,
+  RankedProductOffer,
+} from '../types/spark';
+import { buildAuthenticatedHeaders } from '../utils/authClient';
+
+export interface CouponsViewProps {
+  sessionOffers: RankedProductOffer[];
+  sessionCoupons: CouponItem[];
+  onNotify?: (message: string) => void;
+}
+
+export const CouponsView: React.FC<CouponsViewProps> = ({
+  sessionOffers,
+  sessionCoupons,
+  onNotify,
+}) => {
+  const [status, setStatus] = useState<FeedicoStatusResponse | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [countryFilter, setCountryFilter] = useState<string>('');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'ending_soon' | 'merchant' | 'code'>(
+    'newest'
+  );
+  const [offers, setOffers] = useState<FeedicoNormalizedOffer[]>([]);
+  const [merchants, setMerchants] = useState<FeedicoMerchantRecord[]>([]);
+  const [clicks, setClicks] = useState<FeedicoAffiliateClickRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshingCache, setIsRefreshingCache] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [copiedOfferId, setCopiedOfferId] = useState<string | null>(null);
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
+
+  const loadFeedicoDiagnostics = useCallback(async (): Promise<FeedicoStatusResponse | null> => {
+    let loadedStatus: FeedicoStatusResponse | null = null;
+    try {
+      const [statusRes, clicksRes] = await Promise.all([
+        fetch('/api/feedico/status', {
+          headers: buildAuthenticatedHeaders({ method: 'GET' }),
+        }),
+        fetch('/api/coupons/clicks', {
+          headers: buildAuthenticatedHeaders({ method: 'GET' }),
+        }),
+      ]);
+
+      if (statusRes.ok) {
+        const data = await statusRes.json();
+        if (data.status) {
+          loadedStatus = data.status;
+          setStatus(data.status);
+        }
+      }
+      if (clicksRes.ok) {
+        const clickData = await clicksRes.json();
+        if (Array.isArray(clickData.clicks)) {
+          setClicks(clickData.clicks);
+        }
+      }
+    } catch {
+      // Ignore transient diagnostic fetch error
+    }
+    return loadedStatus;
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const initialStatus = await loadFeedicoDiagnostics();
+      if (!mounted || !initialStatus?.configured) return;
+      // Automatically load initial live catalog coupons & merchants on first open when configured
+      try {
+        setIsLoading(true);
+        const [couponRes, merchantRes] = await Promise.all([
+          fetch('/api/coupons/search', {
+            method: 'POST',
+            headers: buildAuthenticatedHeaders({ method: 'POST' }),
+            body: JSON.stringify({ page: 1, pageSize: 24, sort: 'newest' }),
+          }),
+          fetch('/api/coupons/merchants', {
+            method: 'POST',
+            headers: buildAuthenticatedHeaders({ method: 'POST' }),
+            body: JSON.stringify({ hasCoupons: true, page: 1, pageSize: 12 }),
+          }),
+        ]);
+        if (!mounted) return;
+        if (couponRes.ok) {
+          const couponData = await couponRes.json();
+          if (couponData.ok && Array.isArray(couponData.offers)) {
+            setOffers(couponData.offers);
+          }
+        }
+        if (merchantRes.ok) {
+          const merchData = await merchantRes.json();
+          if (merchData.ok && Array.isArray(merchData.merchants)) {
+            setMerchants(merchData.merchants);
+          }
+        }
+        await loadFeedicoDiagnostics();
+      } catch {
+        // Ignore initial load error
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [loadFeedicoDiagnostics]);
+
+  const handleSearchCoupons = async (e?: React.FormEvent, bypassCache = false) => {
+    e?.preventDefault();
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const [couponRes, merchantRes] = await Promise.all([
+        fetch('/api/coupons/search', {
+          method: 'POST',
+          headers: buildAuthenticatedHeaders({ method: 'POST' }),
+          body: JSON.stringify({
+            q: searchQuery.trim() || undefined,
+            countries: countryFilter ? [countryFilter] : undefined,
+            sort: sortOrder,
+            page: 1,
+            pageSize: 30,
+            bypassCache,
+          }),
+        }),
+        fetch('/api/coupons/merchants', {
+          method: 'POST',
+          headers: buildAuthenticatedHeaders({ method: 'POST' }),
+          body: JSON.stringify({
+            q: searchQuery.trim() || undefined,
+            countries: countryFilter ? [countryFilter] : undefined,
+            hasCoupons: true,
+            page: 1,
+            pageSize: 12,
+            bypassCache,
+          }),
+        }),
+      ]);
+
+      const couponData = await couponRes.json();
+      if (!couponRes.ok || !couponData.ok) {
+        setErrorMessage(
+          couponData.error ||
+            'Feedico Partner API could not complete the search. Check FEEDICO_PARTNER_TOKEN configuration.'
+        );
+        if (couponData.status) setStatus(couponData.status);
+        setOffers([]);
+      } else {
+        setOffers(Array.isArray(couponData.offers) ? couponData.offers : []);
+      }
+
+      if (merchantRes.ok) {
+        const merchData = await merchantRes.json();
+        if (Array.isArray(merchData.merchants)) {
+          setMerchants(merchData.merchants);
+        }
+      }
+
+      await loadFeedicoDiagnostics();
+    } catch {
+      setErrorMessage('Network error communicating with Spark Feedico coupon service.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleMatchProductOffers = async (product: RankedProductOffer) => {
+    setSelectedProductId(product.id);
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch('/api/coupons/product', {
+        method: 'POST',
+        headers: buildAuthenticatedHeaders({ method: 'POST' }),
+        body: JSON.stringify({
+          productId: product.id,
+          productName: product.name,
+          merchant: product.merchant,
+          canonicalUrl: product.canonicalUrl,
+          price: product.price,
+          currency: product.currency,
+          country: countryFilter || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setErrorMessage(
+          data.error ||
+            `Could not retrieve Feedico offers for "${product.name}" (${product.merchant}).`
+        );
+        if (data.status) setStatus(data.status);
+        setOffers([]);
+      } else {
+        setOffers(Array.isArray(data.matchedOffers) ? data.matchedOffers : []);
+        if (data.merchant) {
+          setMerchants([data.merchant]);
+        }
+      }
+      await loadFeedicoDiagnostics();
+    } catch {
+      setErrorMessage('Failed to query product-matched coupons from Feedico.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRefreshCache = async () => {
+    setIsRefreshingCache(true);
+    try {
+      const [refreshRes, verifyRes] = await Promise.all([
+        fetch('/api/coupons/cache/refresh', {
+          method: 'POST',
+          headers: buildAuthenticatedHeaders({ method: 'POST' }),
+          body: JSON.stringify({ q: searchQuery.trim() || undefined }),
+        }),
+        fetch('/api/feedico/verify', {
+          method: 'POST',
+          headers: buildAuthenticatedHeaders({ method: 'POST' }),
+          body: JSON.stringify({ q: searchQuery.trim() || undefined }),
+        }),
+      ]);
+      if (verifyRes.ok) {
+        const verifyData = await verifyRes.json();
+        if (verifyData.status) setStatus(verifyData.status);
+        onNotify?.('Feedico Partner API live connectivity verified and cache refreshed.');
+      } else if (refreshRes.ok) {
+        onNotify?.('Feedico offer cache refreshed.');
+      }
+      await loadFeedicoDiagnostics();
+    } catch {
+      // Ignore refresh error
+    } finally {
+      setIsRefreshingCache(false);
+    }
+  };
+
+  const handleCopyCode = (offerId: string, code: string | null) => {
+    if (!code) return;
+    navigator.clipboard?.writeText(code);
+    setCopiedOfferId(offerId);
+    onNotify?.(`Copied coupon code ${code} to clipboard.`);
+    setTimeout(() => {
+      setCopiedOfferId((prev) => (prev === offerId ? null : prev));
+    }, 2000);
+  };
+
+  const handleTrackAffiliateClick = async (offer: FeedicoNormalizedOffer) => {
+    try {
+      const res = await fetch('/api/coupons/track-click', {
+        method: 'POST',
+        headers: buildAuthenticatedHeaders({ method: 'POST' }),
+        body: JSON.stringify({
+          feedicoOfferId: offer.feedico_offer_id,
+          merchantId: offer.merchant_id,
+          merchantName: offer.merchant_name,
+          couponCode: offer.coupon_code,
+          goUrl: offer.tracked_url,
+          merchantWebsiteUrl: offer.website_url,
+          targetCountry: countryFilter || null,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.click) {
+          setClicks((prev) => [data.click, ...prev]);
+        }
+      }
+    } catch {
+      // Non-blocking attribution recording
+    }
+  };
+
+  const isVerifiedLive = status?.integrationState === 'CONFIGURED_AND_VERIFIED';
+  const isConfiguredUnverified = status?.integrationState === 'CONFIGURED_BUT_UNVERIFIED';
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      {/* Header & Feedico Partner API Status Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight text-white">
+              Coupons, Deals & Affiliate Attribution
+            </h1>
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-violet-500/15 border border-violet-400/30 text-violet-200">
+              Feedico Partner API
+            </span>
+          </div>
+          <p className="text-xs text-zinc-400 mt-1">
+            Primary external source for merchant coupons, promotional offers, and tracked /go/ links. Spark never invents coupon codes, discounts, or expiration dates.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleRefreshCache}
+          disabled={isRefreshingCache}
+          data-testid="feedico-verify-refresh-btn"
+          className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-white/[0.08] text-xs font-medium text-zinc-200 inline-flex items-center gap-1.5 self-start cursor-pointer"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingCache ? 'animate-spin' : ''}`} />
+          <span>Verify & Refresh Catalog</span>
+        </button>
+      </div>
+
+      {/* Feedico Connection & Cache Status Card */}
+      {status && (
+        <div
+          data-testid="feedico-status-card"
+          data-integration-state={status.integrationState}
+          className={`rounded-2xl border p-5 space-y-3 ${
+            isVerifiedLive
+              ? 'bg-emerald-500/[0.06] border-emerald-500/25'
+              : isConfiguredUnverified
+              ? 'bg-cyan-500/[0.06] border-cyan-500/25'
+              : status.integrationState === 'INVALID_CREDENTIALS' ||
+                status.integrationState === 'PROVIDER_UNAVAILABLE'
+              ? 'bg-rose-500/[0.06] border-rose-500/25'
+              : 'bg-[#121217]/95 border-amber-500/25'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              {isVerifiedLive ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle
+                  className={`w-5 h-5 shrink-0 ${
+                    isConfiguredUnverified
+                      ? 'text-cyan-400'
+                      : status.integrationState === 'INVALID_CREDENTIALS' ||
+                        status.integrationState === 'PROVIDER_UNAVAILABLE'
+                      ? 'text-rose-400'
+                      : 'text-amber-400'
+                  }`}
+                />
+              )}
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-sm font-semibold text-white">
+                    {isVerifiedLive
+                      ? `Feedico Partner API Connected & Verified (${status.baseUrl})`
+                      : isConfiguredUnverified
+                      ? `Feedico Partner API Configured — Awaiting Live Verification (${status.baseUrl})`
+                      : status.integrationState === 'INVALID_CREDENTIALS'
+                      ? 'Feedico Partner API — Invalid or Unauthorized Partner Token'
+                      : status.integrationState === 'RATE_LIMITED'
+                      ? 'Feedico Partner API — Rate Limited (HTTP 429)'
+                      : status.integrationState === 'PROVIDER_UNAVAILABLE'
+                      ? 'Feedico Partner API — Upstream Provider Unavailable'
+                      : 'Feedico Partner API — Partner Token Required for Live Catalog Queries'}
+                  </h2>
+                  <span
+                    data-testid="feedico-integration-state-badge"
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono border ${
+                      isVerifiedLive
+                        ? 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
+                        : isConfiguredUnverified
+                        ? 'bg-cyan-500/15 border-cyan-400/30 text-cyan-300'
+                        : status.integrationState === 'INVALID_CREDENTIALS' ||
+                          status.integrationState === 'PROVIDER_UNAVAILABLE'
+                        ? 'bg-rose-500/15 border-rose-400/30 text-rose-300'
+                        : 'bg-amber-500/15 border-amber-400/30 text-amber-300'
+                    }`}
+                  >
+                    {status.integrationState}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-300 mt-0.5">{status.statusMessage}</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-zinc-300">
+              <span className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10">
+                TTL: {status.cacheTtlSeconds}s
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10">
+                Cached Offers: {status.cachedOffersCount}
+              </span>
+              {status.staleOffersCount > 0 && (
+                <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-400/30 text-amber-300">
+                  Stale: {status.staleOffersCount}
+                </span>
+              )}
+              <span className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10">
+                User Clicks: {clicks.length}
+              </span>
+            </div>
+          </div>
+
+          {!status.configured && (
+            <div className="pt-2 border-t border-white/[0.07] text-xs text-zinc-400 leading-relaxed">
+              To enable live Feedico Partner API responses: verify your site or AI agent at{' '}
+              <a
+                href="https://partner.feedico.io/docs"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-cyan-300 hover:underline"
+              >
+                partner.feedico.io/docs
+              </a>{' '}
+              and set <code className="font-mono text-zinc-200">FEEDICO_PARTNER_TOKEN=fdcp_...</code>{' '}
+              (or <code className="font-mono text-zinc-200">fdco_...</code>) in AI Studio Secrets / Google Cloud Run Secret Manager. Spark strictly refuses to fabricate fallback coupons when the Partner token is absent.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Search & Country Filter Form */}
+      <form
+        onSubmit={(e) => handleSearchCoupons(e, false)}
+        className="rounded-2xl bg-[#121217]/95 border border-white/[0.08] p-4 space-y-3"
+      >
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+          <div className="md:col-span-6 relative">
+            <label htmlFor="feedico-coupon-search-input" className="sr-only">
+              Search merchant or coupon keyword
+            </label>
+            <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              id="feedico-coupon-search-input"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search merchant name, domain, or keyword (e.g., nike, new balance, software)..."
+              className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-white/[0.08] text-xs sm:text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-violet-400/50"
+            />
+          </div>
+
+          <div className="md:col-span-3">
+            <label htmlFor="feedico-country-select" className="sr-only">
+              Target Country
+            </label>
+            <div className="relative">
+              <Globe className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <select
+                id="feedico-country-select"
+                value={countryFilter}
+                onChange={(e) => setCountryFilter(e.target.value)}
+                className="w-full pl-8 pr-3 py-2.5 rounded-xl bg-zinc-900 border border-white/[0.08] text-xs text-white"
+              >
+                <option value="">All Countries (+ Worldwide)</option>
+                <option value="US">United States (US + WW)</option>
+                <option value="GB">United Kingdom (GB + WW)</option>
+                <option value="DE">Germany (DE + WW)</option>
+                <option value="FR">France (FR + WW)</option>
+                <option value="CA">Canada (CA + WW)</option>
+                <option value="WW">Worldwide Only (WW)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="md:col-span-3 flex items-center gap-2">
+            <label htmlFor="feedico-sort-select" className="sr-only">
+              Sort offers
+            </label>
+            <select
+              id="feedico-sort-select"
+              value={sortOrder}
+              onChange={(e) =>
+                setSortOrder(
+                  e.target.value as 'newest' | 'ending_soon' | 'merchant' | 'code'
+                )
+              }
+              className="flex-1 px-3 py-2.5 rounded-xl bg-zinc-900 border border-white/[0.08] text-xs text-white"
+            >
+              <option value="newest">Sort: Newest</option>
+              <option value="ending_soon">Ending Soon</option>
+              <option value="merchant">Merchant Name</option>
+              <option value="code">Coupon Code</option>
+            </select>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 text-xs font-semibold text-white inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+            >
+              {isLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <TicketPercent className="w-3.5 h-3.5" />
+              )}
+              <span>Search</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Product-to-Merchant Coupon Matcher for Discovered Session Products */}
+        {sessionOffers.length > 0 && (
+          <div className="pt-3 border-t border-white/[0.06] flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-zinc-400">
+              Match offers for discovered products:
+            </span>
+            {sessionOffers.slice(0, 4).map((prod) => (
+              <button
+                key={prod.id}
+                type="button"
+                onClick={() => handleMatchProductOffers(prod)}
+                className={`px-3 py-1 rounded-full text-xs border transition-colors cursor-pointer ${
+                  selectedProductId === prod.id
+                    ? 'bg-violet-500/20 border-violet-400/40 text-violet-200'
+                    : 'bg-zinc-900 hover:bg-zinc-800 border-white/[0.08] text-zinc-300'
+                }`}
+              >
+                {prod.merchant} · {prod.name.slice(0, 28)}
+              </button>
+            ))}
+          </div>
+        )}
+      </form>
+
+      {/* Error State */}
+      {errorMessage && (
+        <div
+          role="alert"
+          className="rounded-2xl bg-amber-500/10 border border-amber-500/25 p-4 flex items-start gap-3 text-xs text-amber-200"
+        >
+          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="font-semibold text-amber-300">
+              Feedico Partner API Status Notice
+            </div>
+            <p className="leading-relaxed">{errorMessage}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Matched Merchants Bar */}
+      {merchants.length > 0 && (
+        <div className="space-y-2.5">
+          <h2 className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+            <Store className="w-3.5 h-3.5 text-violet-400" />
+            <span>Matched Feedico Partner Merchants ({merchants.length})</span>
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {merchants.map((m) => (
+              <div
+                key={m.merchant_id}
+                className="rounded-xl bg-[#14141D] border border-white/[0.08] p-3.5 flex items-center justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-white truncate">{m.name}</div>
+                  <div className="text-[11px] font-mono text-zinc-400 truncate">
+                    {m.domain || m.provider} · {m.coupon_count} active code(s)
+                  </div>
+                </div>
+                <a
+                  href={m.tracked_url}
+                  target="_blank"
+                  rel="noopener noreferrer sponsored"
+                  className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-cyan-300 inline-flex items-center gap-1 shrink-0"
+                >
+                  <span>Store</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Normalized Feedico Offer Cards */}
+      {offers.length > 0 ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Tag className="w-4 h-4 text-emerald-400" />
+              <span>Normalized Feedico Offers ({offers.length})</span>
+            </h2>
+            <span className="text-[11px] font-mono text-zinc-400">
+              Classified by verification status & expiration
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3.5">
+            {offers.map((offer) => {
+              const isNoCode = offer.verification_status === 'no_code_deal' || !offer.coupon_code;
+              const isExpired = offer.verification_status === 'expired';
+              const isCopied = copiedOfferId === offer.feedico_offer_id;
+              const countriesLabel =
+                offer.target_countries.length === 0
+                  ? 'Unspecified (merchant terms apply)'
+                  : offer.target_countries.includes('WW')
+                  ? 'Worldwide (WW)'
+                  : offer.target_countries.join(', ');
+
+              return (
+                <article
+                  key={offer.feedico_offer_id}
+                  className={`rounded-2xl border p-5 space-y-3 transition-colors ${
+                    isExpired
+                      ? 'bg-zinc-900/50 border-rose-500/25 opacity-75'
+                      : 'bg-[#121218]/95 border-white/[0.1] hover:border-emerald-400/35'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-white">
+                          {offer.merchant_name}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-violet-500/15 border border-violet-400/30 text-violet-200">
+                          {offer.discount.label}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-mono border ${
+                            isExpired
+                              ? 'bg-rose-500/15 border-rose-400/30 text-rose-300'
+                              : isNoCode
+                              ? 'bg-cyan-500/15 border-cyan-400/30 text-cyan-200'
+                              : 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
+                          }`}
+                        >
+                          {isExpired
+                            ? 'Expired Offer'
+                            : isNoCode
+                            ? 'No-Code Deal'
+                            : 'Verified Active Code'}
+                        </span>
+                        {offer.is_stale && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-amber-500/15 border border-amber-400/30 text-amber-300">
+                            Stale Cache — Refresh Recommended
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="text-sm font-medium text-zinc-100">{offer.title}</h3>
+
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-mono text-zinc-400">
+                        <span>
+                          Source: Feedico Partner API ({offer.provider})
+                        </span>
+                        <span>·</span>
+                        <span>Countries: {countriesLabel}</span>
+                        <span>·</span>
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {offer.expiration_date
+                            ? `${isExpired ? 'Expired' : 'Ends'}: ${new Date(
+                                offer.expiration_date
+                              ).toLocaleDateString()}`
+                            : 'No fixed expiration date'}
+                        </span>
+                      </div>
+
+                      {offer.match_reason && (
+                        <div className="text-[11px] font-mono text-cyan-300">
+                          Match Intelligence: {offer.match_reason}
+                        </div>
+                      )}
+
+                      {offer.eligibility_conditions.length > 0 && (
+                        <p className="text-xs text-zinc-400 leading-relaxed">
+                          Conditions: {offer.eligibility_conditions.join(' ')}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap sm:flex-col items-stretch sm:items-end gap-2 shrink-0">
+                      {offer.coupon_code && !isExpired ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCopyCode(offer.feedico_offer_id, offer.coupon_code)
+                          }
+                          className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/35 text-xs font-mono font-semibold text-emerald-200 inline-flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <span>{offer.coupon_code}</span>
+                          {isCopied ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-300" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5 text-emerald-300" />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-white/[0.08] text-[11px] font-mono text-zinc-400 text-center">
+                          {isExpired ? 'Expired' : 'No code needed'}
+                        </span>
+                      )}
+
+                      <a
+                        href={offer.tracked_url}
+                        target="_blank"
+                        rel="noopener noreferrer sponsored"
+                        onClick={() => handleTrackAffiliateClick(offer)}
+                        className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-white/15 text-xs font-medium text-white inline-flex items-center justify-center gap-1.5"
+                      >
+                        <span>Visit Tracked Merchant Link</span>
+                        <ExternalLink className="w-3.5 h-3.5 text-cyan-300" />
+                      </a>
+                    </div>
+                  </div>
+
+                  <div className="pt-2.5 border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-400">
+                    <span className="inline-flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                      <span>
+                        Affiliate Disclosure: Link includes partner attribution (goUrl). Spark never claims a coupon applies at checkout unless verified by the merchant.
+                      </span>
+                    </span>
+                    <span className="font-mono text-zinc-500">
+                      Offer ID: {offer.feedico_offer_id}
+                    </span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        !isLoading &&
+        sessionCoupons.length === 0 && (
+          <div className="rounded-3xl bg-[#121217]/90 border border-white/[0.08] p-8 text-center space-y-3">
+            <TicketPercent className="w-8 h-8 text-violet-400 mx-auto" />
+            <h3 className="text-base font-semibold text-white">
+              No active Feedico coupons loaded in this view yet
+            </h3>
+            <p className="text-xs text-zinc-400 max-w-xl mx-auto leading-relaxed">
+              Enter a merchant name or keyword above to query the Feedico Partner API catalog (
+              <code className="font-mono text-zinc-300">POST /api/catalog/coupons</code>), or select a discovered product to run merchant matching and discount ranking.
+            </p>
+          </div>
+        )
+      )}
+
+      {/* Per-User Affiliate Click Attribution History */}
+      {clicks.length > 0 && (
+        <div className="rounded-2xl bg-[#121217]/95 border border-white/[0.08] p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold text-white flex items-center gap-2">
+              <MousePointerClick className="w-4 h-4 text-cyan-400" />
+              <span>Your Attributed Affiliate Clicks ({clicks.length})</span>
+            </h2>
+            <span className="text-[11px] font-mono text-zinc-400">
+              Isolated to your Spark account · Clicks are not completed purchases
+            </span>
+          </div>
+          <div className="divide-y divide-white/[0.06] text-xs">
+            {clicks.slice(0, 5).map((clk) => (
+              <div
+                key={clk.click_id}
+                className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+              >
+                <div>
+                  <span className="font-medium text-white">{clk.merchant_name}</span>
+                  {clk.coupon_code && (
+                    <span className="ml-2 font-mono text-emerald-300">
+                      [{clk.coupon_code}]
+                    </span>
+                  )}
+                  <span className="ml-2 font-mono text-[11px] text-zinc-400">
+                    sub={clk.sub_id}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 font-mono text-[11px]">
+                  <span className="text-amber-300">{clk.outcome_status}</span>
+                  <span className="text-zinc-500">
+                    {new Date(clk.clicked_at).toLocaleTimeString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

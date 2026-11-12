@@ -1,0 +1,237 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /* Zelios × iOS 26 Design Tokens — Dark Default */
+    --spark-bg-base: #09090b;
+    --spark-bg-elevated: #0e1017;
+    --spark-surface-1: rgba(18, 19, 27, 0.84);
+    --spark-surface-2: rgba(24, 26, 36, 0.78);
+    --spark-surface-3: rgba(34, 37, 52, 0.65);
+    --spark-glass-border: rgba(255, 255, 255, 0.085);
+    --spark-glass-border-hover: rgba(255, 255, 255, 0.16);
+    --spark-glass-specular: rgba(255, 255, 255, 0.12);
+    --spark-accent-violet: #8b5cf6;
+    --spark-accent-cyan: #22d3ee;
+    --spark-accent-emerald: #10b981;
+    --spark-accent-amber: #f59e0b;
+    --spark-shadow-card: 0 14px 34px -12px rgba(0, 0, 0, 0.65), inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+    --spark-shadow-floating: 0 24px 56px -14px rgba(0, 0, 0, 0.78), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+    --spark-radius-sm: 0.625rem;
+    --spark-radius-md: 0.875rem;
+    --spark-radius-lg: 1.25rem;
+    --spark-radius-xl: 1.75rem;
+    --spark-transition-fast: 150ms cubic-bezier(0.22, 1, 0.36, 1);
+    --spark-transition-smooth: 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  html,
+  body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  body {
+    background-color: var(--spark-bg-base);
+    color: #fafafa;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+/* Zelios × iOS 26 Glassmorphic Surface Utilities */
+.spark-glass-panel {
+  background: linear-gradient(180deg, rgba(20, 22, 32, 0.86) 0%, rgba(12, 13, 20, 0.92) 100%);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid var(--spark-glass-border);
+  box-shadow: var(--spark-shadow-card);
+}
+
+.spark-glass-card {
+  background: linear-gradient(180deg, rgba(22, 24, 34, 0.82) 0%, rgba(14, 15, 22, 0.90) 100%);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid var(--spark-glass-border);
+  box-shadow: var(--spark-shadow-card);
+  transition: transform var(--spark-transition-smooth), border-color var(--spark-transition-smooth), box-shadow var(--spark-transition-smooth);
+}
+
+.spark-glass-card:hover {
+  border-color: var(--spark-glass-border-hover);
+}
+
+.spark-glass-pill {
+  background: rgba(255, 255, 255, 0.045);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Scrollbar Refinement */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+@keyframes spark-gradient-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.spark-hero-gradient {
+  background: linear-gradient(
+    90deg,
+    #38bdf8,
+    #818cf8,
+    #a855f7,
+    #ec4899,
+    #f97316,
+    #a855f7,
+    #38bdf8
+  );
+  background-size: 240% 240%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: spark-gradient-flow 9s ease infinite;
+}
+
+@keyframes spark-border-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.spark-rgb-ring {
+  background: conic-gradient(
+    from 0deg,
+    #22d3ee,
+    #6366f1,
+    #a855f7,
+    #ec4899,
+    #f97316,
+    #eab308,
+    #22d3ee
+  );
+  animation: spark-border-spin 4.5s linear infinite;
+}
+
+/* Reduced Motion Accessibility Support */
+@media (prefers-reduced-motion: reduce) {
+  .spark-hero-gradient,
+  .spark-rgb-ring {
+    animation: none !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Light Mode Adaptive Tokens (Preserving Primary CTA Button Contrast) */
+html.light body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+html.light .bg-\[\#09090B\],
+html.light .bg-\[\#09090b\] {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+html.light .bg-\[\#0D0D11\],
+html.light .bg-\[\#0E0E12\],
+html.light .bg-\[\#0f0f14\]\/95,
+html.light .bg-\[\#121217\],
+html.light .bg-\[\#121217\]\/95,
+html.light .bg-\[\#121217\]\/90,
+html.light .bg-\[\#121217\]\/80 {
+  background-color: rgba(255, 255, 255, 0.94) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: #0f172a !important;
+}
+
+html.light .bg-zinc-900,
+html.light .bg-zinc-900\/90,
+html.light .bg-zinc-900\/80,
+html.light .bg-zinc-900\/70,
+html.light .bg-zinc-900\/60,
+html.light .bg-zinc-950,
+html.light .bg-zinc-950\/80,
+html.light .bg-zinc-950\/75,
+html.light .bg-zinc-950\/70,
+html.light .bg-zinc-950\/60 {
+  background-color: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: #0f172a !important;
+}
+
+/* Invert white text on light surfaces, while keeping white text on vibrant filled CTA buttons */
+html.light .text-white:not(.bg-violet-600):not(.bg-blue-600):not(.bg-emerald-600):not(.bg-rose-600):not([class*="from-blue-"]):not([class*="from-violet-"]),
+html.light .text-\[\#FAFAFA\],
+html.light .text-zinc-100,
+html.light .text-zinc-200 {
+  color: #0f172a !important;
+}
+
+html.light .text-zinc-300,
+html.light .text-zinc-400 {
+  color: #475569 !important;
+}
+
+/* Typography Scale Modifiers */
+html.font-scale-compact {
+  font-size: 14px;
+}
+
+html.font-scale-default {
+  font-size: 16px;
+}
+
+html.font-scale-large {
+  font-size: 18px;
+}

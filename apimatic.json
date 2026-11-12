@@ -1,0 +1,40 @@
+{
+  "$schema": "https://cdn.jsdelivr.net/npm/@apimatic/cli@2/apimatic.schema.json",
+  "schemaVersion": 1,
+  "version": "1",
+  "import": {
+    "source": "./spec/checkout_orders_v2.json"
+  },
+  "portal": {
+    "output": "./portal-build",
+    "site": {
+      "name": "Spark — PayPal Orders API v2 & Commerce Portal",
+      "url": "https://spark.app/docs",
+      "description": "Production-grade PayPal Sandbox Orders API v2 specification, SDK documentation, and AI assistant context plugins for Spark."
+    },
+    "ai": {
+      "pageActions": true
+    },
+    "contextPlugins": {
+      "claude": true,
+      "cursor": true,
+      "vscode": true
+    }
+  },
+  "plugin": {
+    "pluginId": "spark-paypal-orders-v2",
+    "pluginName": "Spark PayPal Orders API v2",
+    "pluginVersion": "1.0.0",
+    "author": {
+      "name": "Spark Engineering",
+      "email": "bobs197ysb017@gmail.com"
+    },
+    "license": "MIT"
+  },
+  "languages": {
+    "typescript": {},
+    "python": {},
+    "csharp": {}
+  },
+  "sdks": {}
+}
