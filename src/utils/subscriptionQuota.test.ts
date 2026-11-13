@@ -23,6 +23,8 @@ import {
 import {
   PAYPAL_BILLING_PLANS,
   activatePayPalSubscription,
+  approvePayPalSubscription,
+  cancelPendingPayPalSubscription,
   changePayPalSubscriptionPlan,
   createPayPalSubscription,
   evaluatePayPalSubscriptionEligibility,
@@ -366,3 +368,45 @@ test('7. PayPal Wallet Deduction on Subscription Activation & Insufficient Balan
   assert.equal(getUserQuotaStatus(userId).plan.id, 'terra');
 });
 
+test('8. Two-Step Explicit PayPal Subscription Approval & Pending Cancellation', () => {
+  const userId = `two_step_${Date.now()}`;
+  const session = createPayPalSubscription({ userId, userEmail: 'twostep@spark.app', planId: 'luna' });
+  assert.equal(session.status, 'APPROVAL_PENDING');
+
+  // Reject activation if requireExplicitApproval is true and buyer has not approved yet
+  const unapprovedAttempt = activatePayPalSubscription({
+    userId,
+    subscriptionId: session.subscriptionId,
+    planId: 'luna',
+    requireExplicitApproval: true,
+  });
+  assert.equal(unapprovedAttempt.ok, false);
+  assert.equal(unapprovedAttempt.errorCode, 'subscription_not_approved');
+
+  // Approve explicitly, then activate succeeds
+  const approval = approvePayPalSubscription({
+    userId,
+    subscriptionId: session.subscriptionId,
+    payerId: 'PAYER-TWOSTEP-1',
+  });
+  assert.equal(approval.ok, true);
+  assert.equal(approval.session?.approved, true);
+
+  const activated = activatePayPalSubscription({
+    userId,
+    subscriptionId: session.subscriptionId,
+    planId: 'luna',
+    requireExplicitApproval: true,
+  });
+  assert.equal(activated.ok, true);
+  assert.equal(getUserQuotaStatus(userId).plan.id, 'luna');
+
+  // Create another pending session and cancel it cleanly
+  const session2 = createPayPalSubscription({ userId, userEmail: 'twostep@spark.app', planId: 'terra' });
+  const cancelledPending = cancelPendingPayPalSubscription({
+    userId,
+    subscriptionId: session2.subscriptionId,
+  });
+  assert.equal(cancelledPending.ok, true);
+  assert.equal(cancelledPending.session?.cancelled, true);
+});

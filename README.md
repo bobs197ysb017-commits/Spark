@@ -111,7 +111,7 @@ Firebase provides the foundation for:
 
 ### 📈 Analytics & Data Visualization
 
-AG Grid supports advanced data presentation and analytical interfaces, enabling structured product comparisons and information-rich dashboards.
+Spark's Tabular Analytics Workspace (`AgGridAnalyticsWorkspace.tsx` — Spark Tabular Engine) provides sorting, quick search filtering, pagination, KPI metrics, and CSV export across saved products, comparison matrices, purchase ledgers, verified deals, and quota usage—implemented natively in React with zero external `ag-grid` dependency.
 
 ---
 
@@ -119,13 +119,12 @@ AG Grid supports advanced data presentation and analytical interfaces, enabling 
 
 | Technology | Purpose |
 |---|---|
-| Claude | AI reasoning and agent orchestration |
-| Channel3 | Product discovery and product intelligence |
-| PayPal | Payment and purchasing infrastructure |
-| APIMatic | API integration assistance |
-| Firebase | Authentication and persistent data |
-| AG Grid | Data visualization and analytics |
-| Gemini | AI development and supporting model workflows |
+| Google GenAI (`@google/genai`) | AI reasoning, research synthesis, and agent orchestration via Gemini models (`GEMINI_API_KEY`) paired with Spark's deterministic 7-role evaluation pipeline |
+| Channel3 | Primary product discovery, URL lookup, and merchant catalog intelligence |
+| PayPal Sandbox | Payment and purchasing infrastructure (`Orders v2` & Subscriptions) |
+| APIMatic | OpenAPI specification & developer portal documentation (`src/spec/checkout_orders_v2.json`) |
+| Firebase | Authentication and Cloud Firestore persistence |
+| Spark Tabular Engine | Native React tabular analytics workspace (sorting, filtering, pagination, CSV export) |
 
 ### Technology Integration Philosophy
 
@@ -133,9 +132,9 @@ Each technology serves a specific purpose within Spark.
 
 Rather than connecting services without a clear architectural role, Spark organizes them around three major capabilities:
 
-- **Intelligence:** Research, reasoning, evaluation, and decision-making.
-- **Infrastructure:** Authentication, data management, and API connectivity.
-- **Commerce:** Product selection, payment approval, and transaction management.
+- **Intelligence:** `@google/genai` synthesis + deterministic evidence scoring, reasoning, and decision-making.
+- **Infrastructure:** Firebase authentication, Cloud Firestore persistence, and API connectivity.
+- **Commerce:** Channel3 product discovery, PayPal Sandbox payment approval, and transaction ledger management.
 
 ---
 
@@ -146,7 +145,7 @@ The following diagram illustrates Spark's logical architecture.
 ```mermaid
 flowchart TD
     U[User] --> UI[Spark Interface]
-    UI --> O[AI Orchestration Layer]
+    UI --> O[Google GenAI + Spark Agent Orchestration]
 
     O --> I[Intent Intelligence]
     O --> D[Global Product Discovery]
@@ -171,7 +170,7 @@ flowchart TD
 
     UI --> F[Firebase Authentication]
     F --> DB
-    R --> AG[AG Grid Analytics]
+    R --> AG[Spark Tabular Analytics]
 ```
 
 ---
@@ -307,10 +306,10 @@ Create a local `.env` file based on your project's environment configuration.
 Example variable categories:
 
 ```env
-# AI Provider
-AI_PROVIDER_API_KEY=
+# Google GenAI (@google/genai)
+GEMINI_API_KEY=
 
-# Channel3
+# Channel3 (Primary Product Discovery)
 CHANNEL3_API_KEY=
 
 # PayPal Sandbox
@@ -318,10 +317,8 @@ PAYPAL_CLIENT_ID=
 PAYPAL_CLIENT_SECRET=
 PAYPAL_ENV=sandbox
 
-# Firebase
-FIREBASE_PROJECT_ID=
-FIREBASE_CLIENT_EMAIL=
-FIREBASE_PRIVATE_KEY=
+# Optional Legacy Coupon Fallback (Disabled by default)
+FEEDICO_ENABLED=false
 ```
 
 Additional variables may be required depending on the application architecture.

@@ -6,10 +6,10 @@ import {
   CheckCircle2,
   Clock,
   Crown,
+  ExternalLink,
   Loader2,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
   Wallet,
 } from 'lucide-react';
 import type {
@@ -46,6 +46,12 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
 }) => {
   const [selectedPlanForCheckout, setSelectedPlanForCheckout] =
     useState<SubscriptionTierConfig | null>(null);
+  const [pendingSubSession, setPendingSubSession] = useState<{
+    subscriptionId: string;
+    paypalOrderId?: string;
+    approvalUrl: string;
+    planId: SubscriptionPlanId;
+  } | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutSuccess, setCheckoutSuccess] = useState<string | null>(null);
@@ -222,18 +228,34 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
 
   const handleStartSubscribe = (plan: SubscriptionTierConfig) => {
     setSelectedPlanForCheckout(plan);
+    setPendingSubSession(null);
     setCheckoutError(null);
     setCheckoutSuccess(null);
     void fetchBuyerWallet();
   };
 
-  const handleExecuteSubscriptionCheckout = async () => {
+  const handleCloseCheckoutModal = async () => {
+    if (pendingSubSession) {
+      await fetch('/api/subscriptions/cancel-pending', {
+        method: 'POST',
+        headers: buildAuthenticatedHeaders({ method: 'POST' }),
+        credentials: 'include',
+        body: JSON.stringify({
+          subscriptionId: pendingSubSession.subscriptionId,
+          userId: user.id,
+        }),
+      }).catch(() => {});
+    }
+    setPendingSubSession(null);
+    setSelectedPlanForCheckout(null);
+  };
+
+  const handleCreateSubscriptionOrder = async () => {
     if (!selectedPlanForCheckout) return;
     setCheckoutLoading(true);
     setCheckoutError(null);
 
     try {
-      // 1. Create PayPal subscription session
       const createRes = await fetch('/api/subscriptions/create', {
         method: 'POST',
         headers: buildAuthenticatedHeaders({ method: 'POST' }),
@@ -250,6 +272,73 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
         throw new Error(createData.error || 'Failed to initialize PayPal subscription.');
       }
 
+      if (selectedPlanForCheckout.priceMonthly === 0) {
+        const activateRes = await fetch('/api/subscriptions/activate', {
+          method: 'POST',
+          headers: buildAuthenticatedHeaders({ method: 'POST' }),
+          credentials: 'include',
+          body: JSON.stringify({
+            planId: selectedPlanForCheckout.id,
+            subscriptionId: createData.subscriptionId,
+            userId: user.id,
+            userEmail: user.email,
+          }),
+        });
+        const activateData = await activateRes.json();
+        if (!activateRes.ok || !activateData.ok) {
+          throw new Error(activateData.error || 'Failed to switch to Free Trial plan.');
+        }
+        setCheckoutSuccess('Switched to Free Trial plan. Quotas updated instantly.');
+        if (onPlanActivated) {
+          onPlanActivated(selectedPlanForCheckout.id, activateData.accountBalance || null);
+        }
+        await onRefreshQuota();
+        await fetchBuyerWallet();
+        setTimeout(() => {
+          setPendingSubSession(null);
+          setSelectedPlanForCheckout(null);
+        }, 1200);
+        return;
+      }
+
+      setPendingSubSession({
+        subscriptionId: createData.subscriptionId,
+        paypalOrderId: createData.paypalOrderId,
+        approvalUrl: createData.approvalUrl,
+        planId: selectedPlanForCheckout.id,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Subscription error occurred.';
+      setCheckoutError(msg);
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
+  const handleApproveAndActivateSubscription = async () => {
+    if (!selectedPlanForCheckout || !pendingSubSession) return;
+    setCheckoutLoading(true);
+    setCheckoutError(null);
+
+    try {
+      const payerId = buyerWallet?.buyerAccountId || `PAYER-${user.id.slice(0, 8)}`;
+
+      // 1. Record explicit PayPal Sandbox buyer approval
+      const approveRes = await fetch('/api/subscriptions/approve', {
+        method: 'POST',
+        headers: buildAuthenticatedHeaders({ method: 'POST' }),
+        credentials: 'include',
+        body: JSON.stringify({
+          subscriptionId: pendingSubSession.subscriptionId,
+          userId: user.id,
+          payerId,
+        }),
+      });
+      const approveData = await approveRes.json();
+      if (!approveRes.ok || !approveData.ok) {
+        throw new Error(approveData.error || 'Failed to confirm PayPal Sandbox buyer approval.');
+      }
+
       // 2. Activate subscription & deduct plan charge from PayPal wallet
       const activateRes = await fetch('/api/subscriptions/activate', {
         method: 'POST',
@@ -257,10 +346,11 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
         credentials: 'include',
         body: JSON.stringify({
           planId: selectedPlanForCheckout.id,
-          subscriptionId: createData.subscriptionId,
+          subscriptionId: pendingSubSession.subscriptionId,
           userId: user.id,
           userEmail: user.email,
-          payerId: buyerWallet?.buyerAccountId || `PAYER-${user.id.slice(0, 8)}`,
+          payerId,
+          requireExplicitApproval: true,
         }),
       });
 
@@ -279,17 +369,14 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
           ? activateData.buyerWallet.availableBalance
           : Math.max(0, effectiveAvailableBalance - selectedPlanForCheckout.priceMonthly);
 
-      if (selectedPlanForCheckout.priceMonthly > 0) {
-        setCheckoutSuccess(
-          `Successfully subscribed to ${selectedPlanForCheckout.name} ($${selectedPlanForCheckout.priceMonthly.toFixed(
-            2
-          )}/mo)! Deducted $${selectedPlanForCheckout.priceMonthly.toFixed(
-            2
-          )} from your PayPal wallet — New balance: $${newWalletBal.toFixed(2)} ${effectiveCurrency}.`
-        );
-      } else {
-        setCheckoutSuccess('Switched to Free Trial plan. Quotas updated instantly.');
-      }
+      setCheckoutSuccess(
+        `Successfully subscribed to ${selectedPlanForCheckout.name} ($${selectedPlanForCheckout.priceMonthly.toFixed(
+          2
+        )}/mo)! Deducted $${selectedPlanForCheckout.priceMonthly.toFixed(
+          2
+        )} from your PayPal wallet — New balance: $${Number(newWalletBal).toFixed(2)} ${effectiveCurrency}.`
+      );
+      setPendingSubSession(null);
 
       if (onPlanActivated) {
         onPlanActivated(selectedPlanForCheckout.id, activateData.accountBalance || null);
@@ -712,7 +799,7 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
                 ))}
               </tr>
               <tr>
-                <td className="p-3.5 text-zinc-300 font-sans">Feedico Coupon Lookups</td>
+                <td className="p-3.5 text-zinc-300 font-sans">Verified Coupon Lookups</td>
                 {plans.map((p) => (
                   <td key={p.id} className="p-3.5 text-zinc-100">
                     {p.monthlyCoupons.toLocaleString()} / mo
@@ -805,7 +892,7 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedPlanForCheckout(null)}
+                onClick={handleCloseCheckoutModal}
                 className="text-zinc-400 hover:text-white text-xs cursor-pointer"
               >
                 Cancel
@@ -897,37 +984,97 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
               </div>
             )}
 
+            {pendingSubSession && !checkoutSuccess && (
+              <div
+                data-testid="subscription-sandbox-approval-step"
+                className="p-3.5 rounded-2xl bg-[#003087]/25 border border-[#0070BA]/50 space-y-2.5 text-xs"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-cyan-300">
+                    PayPal Sandbox Approval Pending
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[10px] font-mono text-amber-300">
+                    SANDBOX
+                  </span>
+                </div>
+                <div className="font-mono text-[11px] text-zinc-300 space-y-0.5">
+                  <div>Subscription ID: <span className="text-white">{pendingSubSession.subscriptionId}</span></div>
+                  {pendingSubSession.paypalOrderId && (
+                    <div>PayPal Order Ref: <span className="text-cyan-300">{pendingSubSession.paypalOrderId}</span></div>
+                  )}
+                </div>
+                {pendingSubSession.approvalUrl && (
+                  <a
+                    href={pendingSubSession.approvalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="subscription-paypal-approval-link"
+                    className="inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-300 hover:underline"
+                  >
+                    <span>Open PayPal Sandbox Approval Link</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+            )}
+
             <div className="text-[11px] text-zinc-400 leading-relaxed">
-              The subscription fee is immediately deducted from your PayPal wallet upon activation. You can cancel anytime before the next billing cycle.
+              {pendingSubSession
+                ? 'Confirm PayPal Sandbox buyer approval below to activate your subscription and deduct the fee from your PayPal Sandbox wallet.'
+                : 'Step 1 creates a PayPal Sandbox subscription approval session; Step 2 records buyer approval and deducts the fee from your PayPal wallet.'}
             </div>
 
             <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setSelectedPlanForCheckout(null)}
+                onClick={handleCloseCheckoutModal}
                 className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 cursor-pointer"
               >
-                Back
+                {pendingSubSession ? 'Cancel Order' : 'Back'}
               </button>
-              <button
-                type="button"
-                data-testid="confirm-activate-subscription-btn"
-                disabled={checkoutLoading}
-                onClick={handleExecuteSubscriptionCheckout}
-                className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-xs font-semibold text-white flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                {checkoutLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Processing Payment...
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck className="w-4 h-4" />
-                    Activate &amp; Pay with PayPal
-                  </>
-                )}
-              </button>
+              {!pendingSubSession ? (
+                <button
+                  type="button"
+                  data-testid="create-subscription-order-btn"
+                  disabled={checkoutLoading}
+                  onClick={handleCreateSubscriptionOrder}
+                  className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-xs font-semibold text-white flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {checkoutLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Creating Session...
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-4 h-4" />
+                      {selectedPlanForCheckout.priceMonthly === 0
+                        ? 'Confirm Free Trial'
+                        : 'Continue to PayPal Sandbox'}
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="confirm-activate-subscription-btn"
+                  disabled={checkoutLoading}
+                  onClick={handleApproveAndActivateSubscription}
+                  className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {checkoutLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Activating Plan...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      Approve &amp; Activate Subscription
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

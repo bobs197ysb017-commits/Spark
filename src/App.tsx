@@ -37,6 +37,7 @@ import type {
   UserProfile,
 } from './types/spark';
 import {
+  archiveConversationInFirestore,
   auth,
   authenticateAuthorizedDomainSession,
   consumeGoogleRedirectResult,
@@ -3251,7 +3252,7 @@ export default function App() {
             />
           )}
 
-          {/* SECTION 3: COUPONS & DEALS (FEEDICO PARTNER API) */}
+          {/* SECTION 3: COUPONS & DEALS */}
           {activeSection === 'coupons' && (
             <CouponsView
               sessionOffers={allSessionOffers}
@@ -3356,7 +3357,10 @@ export default function App() {
               coupons={latestOrchestration?.verifiedCoupons || []}
               quotaStatus={quotaStatus}
               onOpenDetails={(prod) => setInspectedProduct(prod)}
-              onSelectForCheckout={(prod) => setProductForCheckout(prod)}
+              onSelectForCheckout={(prod) => {
+                setIsCartCheckoutOpen(false);
+                setProductForCheckout(prod);
+              }}
               onRefreshData={refreshQuotaStatus}
             />
           )}

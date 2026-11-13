@@ -43,8 +43,8 @@ export function validateAuthInput(
 
   if (!password) {
     errors.password = 'Password is required.';
-  } else if (password.length < 6) {
-    errors.password = 'Password must be at least 6 characters long.';
+  } else if (password.length < 8) {
+    errors.password = 'Password must be at least 8 characters long.';
   }
 
   return {
@@ -1217,7 +1217,10 @@ export function buildActivityTimelineStages(
         id: 'understand_request',
         label: 'Understanding the request',
         state: 'completed',
-        sourceQueried: intentStep?.modelUsed || 'Deterministic Intent Parser',
+        sourceQueried:
+          intentStep?.modelUsed && !/gemini/i.test(intentStep.modelUsed)
+            ? intentStep.modelUsed
+            : 'Query & Budget Analysis',
         summary:
           intentStep?.summary ||
           `Classified request as ${
@@ -1238,7 +1241,10 @@ export function buildActivityTimelineStages(
           response.responseType === 'missing_information'
             ? 'requires_user_input'
             : 'completed',
-        sourceQueried: coordinatorStep?.modelUsed || 'Spark Shopping Coordinator',
+        sourceQueried:
+          coordinatorStep?.modelUsed && !/gemini/i.test(coordinatorStep.modelUsed)
+            ? coordinatorStep.modelUsed
+            : 'Spark Shopping Assistant',
         summary:
           coordinatorStep?.summary ||
           'Prepared response without triggering unnecessary product source queries.',
@@ -1267,7 +1273,10 @@ export function buildActivityTimelineStages(
       id: 'understand_request',
       label: 'Understanding the request',
       state: 'completed',
-      sourceQueried: intentStep?.modelUsed || 'Deterministic Intent Parser',
+      sourceQueried:
+        intentStep?.modelUsed && !/gemini/i.test(intentStep.modelUsed)
+          ? intentStep.modelUsed
+          : 'Query & Budget Analysis',
       summary:
         intentStep?.summary ||
         `Parsed query "${response.intent.rawQuery}" (${response.intent.category || 'general'}).`,
@@ -1336,7 +1345,10 @@ export function buildActivityTimelineStages(
       id: 'compare_options',
       label: 'Comparing best options',
       state: response.offers.length > 0 ? 'completed' : 'failed',
-      sourceQueried: comparisonStep?.modelUsed || 'Strict Field-Completeness Comparator',
+      sourceQueried:
+        comparisonStep?.modelUsed && !/gemini/i.test(comparisonStep.modelUsed)
+          ? comparisonStep.modelUsed
+          : 'Multi-Criteria Product Comparison',
       summary:
         comparisonStep?.summary ||
         `Ranked ${response.offers.length} verified records by completeness and budget compliance.`,

@@ -290,7 +290,7 @@ export const CartView: React.FC<CartViewProps> = ({
               Shopping Cart &amp; Checkout Preparation
             </h1>
             <p className="text-xs sm:text-sm text-zinc-400 max-w-2xl">
-              Server-authoritative pricing, live Channel3 product verification, Feedico coupon evaluation, and multi-device Firestore persistence.
+              Server-authoritative pricing, live Channel3 product verification, verified coupon evaluation, and multi-device Firestore persistence.
             </p>
           </div>
 
@@ -903,7 +903,7 @@ export const CartView: React.FC<CartViewProps> = ({
                   <span>Coupons &amp; Discounts</span>
                 </div>
                 <span className="text-[10px] font-mono text-zinc-400">
-                  Feedico Partner Engine
+                  Spark Coupon Verifier
                 </span>
               </div>
 

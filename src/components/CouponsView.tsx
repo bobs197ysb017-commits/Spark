@@ -357,16 +357,16 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
       {/* Header & Feedico Partner API Status Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight text-white">
-              Coupons, Deals & Affiliate Attribution
+              Coupons, Deals &amp; Affiliate Attribution
             </h1>
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-violet-500/15 border border-violet-400/30 text-violet-200">
-              Feedico Partner API
+              {status?.enabled ? 'Feedico Partner API' : 'Channel3 Primary · Verified Promos'}
             </span>
           </div>
           <p className="text-xs text-zinc-400 mt-1">
-            Primary external source for merchant coupons, promotional offers, and tracked /go/ links. Spark never invents coupon codes, discounts, or expiration dates.
+            Verified promotional discounts for Spark Cart &amp; PayPal Sandbox checkout, paired with Channel3 merchant offer intelligence. Spark never invents coupon codes, discounts, or expiration dates.
           </p>
         </div>
 
@@ -502,13 +502,13 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
         </div>
       </div>
 
-      {/* Feedico Connection & Cache Status Card */}
+      {/* Commerce & Coupon Integration Status Card */}
       {status && (
         <div
           data-testid="feedico-status-card"
           data-integration-state={status.integrationState}
           className={`rounded-2xl border p-5 space-y-3 ${
-            isVerifiedLive
+            isVerifiedLive || !status.enabled
               ? 'bg-emerald-500/[0.06] border-emerald-500/25'
               : isConfiguredUnverified
               ? 'bg-cyan-500/[0.06] border-cyan-500/25'
@@ -520,7 +520,7 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
         >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              {isVerifiedLive ? (
+              {isVerifiedLive || !status.enabled ? (
                 <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
               ) : (
                 <AlertCircle
@@ -537,7 +537,9 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-sm font-semibold text-white">
-                    {isVerifiedLive
+                    {!status.enabled
+                      ? 'Channel3 Primary Commerce Mode — Verified Cart Promo Engine Active'
+                      : isVerifiedLive
                       ? `Feedico Partner API Connected & Verified (${status.baseUrl})`
                       : isConfiguredUnverified
                       ? `Feedico Partner API Configured — Awaiting Live Verification (${status.baseUrl})`
@@ -552,7 +554,7 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
                   <span
                     data-testid="feedico-integration-state-badge"
                     className={`px-2 py-0.5 rounded-md text-[10px] font-mono border ${
-                      isVerifiedLive
+                      isVerifiedLive || !status.enabled
                         ? 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
                         : isConfiguredUnverified
                         ? 'bg-cyan-500/15 border-cyan-400/30 text-cyan-300'
@@ -562,44 +564,32 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
                         : 'bg-amber-500/15 border-amber-400/30 text-amber-300'
                     }`}
                   >
-                    {status.integrationState}
+                    {!status.enabled ? 'CHANNEL3_PRIMARY' : status.integrationState}
                   </span>
                 </div>
-                <p className="text-xs text-zinc-300 mt-0.5">{status.statusMessage}</p>
+                <p className="text-xs text-zinc-300 mt-0.5">
+                  {!status.enabled
+                    ? 'Spark discovery and multi-merchant offer intelligence run on Channel3 Product Graph API. Legacy Feedico lookup is disabled by default (FEEDICO_ENABLED=false).'
+                    : status.statusMessage}
+                </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-zinc-300">
               <span className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10">
-                TTL: {status.cacheTtlSeconds}s
+                Active Cart Promos: {VERIFIED_CART_PROMOS.length}
               </span>
               <span className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10">
-                Cached Offers: {status.cachedOffersCount}
-              </span>
-              {status.staleOffersCount > 0 && (
-                <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-400/30 text-amber-300">
-                  Stale: {status.staleOffersCount}
-                </span>
-              )}
-              <span className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10">
-                User Clicks: {clicks.length}
+                Session Deals: {sessionCoupons.length + offers.length}
               </span>
             </div>
           </div>
 
-          {!status.configured && (
+          {status.enabled && !status.configured && (
             <div className="pt-2 border-t border-white/[0.07] text-xs text-zinc-400 leading-relaxed">
-              To enable live Feedico Partner API responses: verify your site or AI agent at{' '}
-              <a
-                href="https://partner.feedico.io/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-cyan-300 hover:underline"
-              >
-                partner.feedico.io/docs
-              </a>{' '}
-              and set <code className="font-mono text-zinc-200">FEEDICO_PARTNER_TOKEN=fdcp_...</code>{' '}
-              (or <code className="font-mono text-zinc-200">fdco_...</code>) in AI Studio Secrets / Google Cloud Run Secret Manager. Spark strictly refuses to fabricate fallback coupons when the Partner token is absent.
+              Optional external Feedico Partner API is enabled without a partner token. Set{' '}
+              <code className="font-mono text-zinc-200">FEEDICO_ENABLED=false</code> to use Channel3 primary mode, or configure{' '}
+              <code className="font-mono text-zinc-200">FEEDICO_PARTNER_TOKEN</code>.
             </div>
           )}
         </div>
@@ -930,11 +920,12 @@ export const CouponsView: React.FC<CouponsViewProps> = ({
           <div className="rounded-3xl bg-[#121217]/90 border border-white/[0.08] p-8 text-center space-y-3">
             <TicketPercent className="w-8 h-8 text-violet-400 mx-auto" />
             <h3 className="text-base font-semibold text-white">
-              No active Feedico coupons loaded in this view yet
+              Verified Cart Promotional Codes Ready Above
             </h3>
             <p className="text-xs text-zinc-400 max-w-xl mx-auto leading-relaxed">
-              Enter a merchant name or keyword above to query the Feedico Partner API catalog (
-              <code className="font-mono text-zinc-300">POST /api/catalog/coupons</code>), or select a discovered product to run merchant matching and discount ranking.
+              Apply <code className="font-mono text-emerald-300">SPARK10</code> (10% off $50+),{' '}
+              <code className="font-mono text-emerald-300">SAVE25</code> ($25 off $150+), or{' '}
+              <code className="font-mono text-emerald-300">AUDIO15</code> (15% off $80+) directly to your Cart above, or search merchant offers when external coupon feeds are enabled.
             </p>
           </div>
         )

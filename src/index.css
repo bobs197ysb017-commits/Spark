@@ -192,6 +192,7 @@ html.light .bg-\[\#0B0B0F\]\/95 {
 }
 
 html.light .bg-\[\#0D0D11\],
+html.light .bg-\[\#0D0D12\],
 html.light .bg-\[\#0E0E12\],
 html.light .bg-\[\#0f0f14\]\/95,
 html.light .bg-\[\#121217\],
@@ -218,6 +219,7 @@ html.light .bg-zinc-900\/80,
 html.light .bg-zinc-900\/75,
 html.light .bg-zinc-900\/70,
 html.light .bg-zinc-900\/60,
+html.light .bg-zinc-900\/40,
 html.light .bg-zinc-950,
 html.light .bg-zinc-950\/90,
 html.light .bg-zinc-950\/80,
@@ -253,6 +255,10 @@ html.light .text-zinc-200 {
 html.light .text-zinc-300,
 html.light .text-zinc-400 {
   color: #475569 !important;
+}
+
+html.light aside button.text-white {
+  color: #312e81 !important;
 }
 
 /* Typography Scale Modifiers */

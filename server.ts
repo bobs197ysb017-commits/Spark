@@ -123,6 +123,8 @@ import {
 import {
   PAYPAL_BILLING_PLANS,
   activatePayPalSubscription,
+  approvePayPalSubscription,
+  cancelPendingPayPalSubscription,
   changePayPalSubscriptionPlan,
   createPayPalSubscription,
   evaluatePayPalSubscriptionEligibility,
@@ -4924,6 +4926,65 @@ async function startServer() {
     });
   });
 
+  // 3B. Record Explicit PayPal Sandbox Buyer Approval for Pending Subscription
+  app.post('/api/subscriptions/approve', (req, res) => {
+    const auth = authenticateRequest(req, res, { optional: true });
+    const targetUserId =
+      auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
+    const { subscriptionId, payerId } = req.body || {};
+
+    if (!subscriptionId || typeof subscriptionId !== 'string') {
+      res.status(400).json({
+        ok: false,
+        errorCode: 'missing_subscription_id',
+        error: 'subscriptionId is required to record PayPal Sandbox approval.',
+      });
+      return;
+    }
+
+    const approved = approvePayPalSubscription({
+      userId: targetUserId,
+      subscriptionId: subscriptionId.trim(),
+      payerId: typeof payerId === 'string' ? payerId : undefined,
+    });
+    if (!approved.ok) {
+      res.status(400).json(approved);
+      return;
+    }
+
+    saveRuntimeSnapshot();
+    res.json(approved);
+  });
+
+  // 3C. Cancel Uncaptured Pending PayPal Sandbox Subscription
+  app.post('/api/subscriptions/cancel-pending', (req, res) => {
+    const auth = authenticateRequest(req, res, { optional: true });
+    const targetUserId =
+      auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
+    const { subscriptionId } = req.body || {};
+
+    if (!subscriptionId || typeof subscriptionId !== 'string') {
+      res.status(400).json({
+        ok: false,
+        errorCode: 'missing_subscription_id',
+        error: 'subscriptionId is required to cancel a pending subscription session.',
+      });
+      return;
+    }
+
+    const cancelled = cancelPendingPayPalSubscription({
+      userId: targetUserId,
+      subscriptionId: subscriptionId.trim(),
+    });
+    if (!cancelled.ok) {
+      res.status(400).json(cancelled);
+      return;
+    }
+
+    saveRuntimeSnapshot();
+    res.json(cancelled);
+  });
+
   // 4. Activate PayPal Subscription upon Buyer Approval (Server-Verified & Deducted from PayPal Wallet)
   app.post('/api/subscriptions/activate', (req, res) => {
     const auth = authenticateRequest(req, res, { optional: true });
@@ -4935,7 +4996,8 @@ async function startServer() {
       usersById.get(targetUserId)?.email ||
       'member@spark.app';
 
-    const { planId, subscriptionId, payerId, browserRedirectOnly } = req.body || {};
+    const { planId, subscriptionId, payerId, browserRedirectOnly, requireExplicitApproval } =
+      req.body || {};
     if (!planId || !['free', 'luna', 'terra', 'sol'].includes(planId)) {
       res.status(400).json({
         ok: false,
@@ -4952,6 +5014,7 @@ async function startServer() {
       planId,
       payerId,
       browserRedirectOnly: Boolean(browserRedirectOnly),
+      requireExplicitApproval: Boolean(requireExplicitApproval),
       chargeWallet: (chargeInput) =>
         paypalSandboxEngine.chargeSubscriptionPlanFromPayPalWallet(chargeInput),
     });
@@ -6568,12 +6631,15 @@ async function startServer() {
 
     const report = agentResult.report!;
 
+    const activeSynthesisModel = report.activeModel || 'gemini-3.1-flash-lite';
+    const isFeedicoActive = feedicoPartnerService.getStatus().enabled;
+
     agentSteps.length = 0;
     agentSteps.push(
       {
         agentId: 'intent',
         agentName: 'Autonomous Research Strategy & Constraint Formulation',
-        modelUsed: 'gemini-3.8-flash',
+        modelUsed: activeSynthesisModel,
         status: 'completed',
         durationMs: Math.max(12, Date.now() - t0),
         summary: `Formulated dynamic research plan for category "${report.category}". Evaluated ${report.evaluationCriteria.length} category criteria.`,
@@ -6597,8 +6663,10 @@ async function startServer() {
       },
       {
         agentId: 'coupon',
-        agentName: 'Feedico Partner Coupon Verification',
-        modelUsed: 'feedico-partner-api',
+        agentName: isFeedicoActive
+          ? 'Feedico Partner Coupon Verification'
+          : 'Verified Merchant Offer & Coupon Intelligence',
+        modelUsed: isFeedicoActive ? 'feedico-partner-api' : 'channel3-offer-verifier',
         status:
           agentResult.verifiedCoupons.length > 0
             ? 'completed'
@@ -6632,7 +6700,7 @@ async function startServer() {
       {
         agentId: 'coordinator',
         agentName: 'Autonomous Gemini Intelligence Synthesis',
-        modelUsed: 'gemini-3.8-flash',
+        modelUsed: activeSynthesisModel,
         status: 'completed',
         durationMs: Math.max(15, Date.now() - t0),
         summary: `Generated defensible recommendation and market synthesis. Top recommendation: "${report.finalRecommendation.recommendedProductName}".`,

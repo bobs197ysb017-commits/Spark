@@ -174,7 +174,17 @@ export function getUserSubscription(userId: string): UserSubscriptionRecord {
       updatedAt: now.toISOString(),
     };
     subscriptionsByUser.set(cleanId, sub);
+    return sub;
   }
+
+  // Automatically expire paid or cancelled-at-period-end subscriptions once period end elapses
+  if (sub.planId !== 'free' && sub.currentPeriodEnd) {
+    const endMs = Date.parse(sub.currentPeriodEnd);
+    if (Number.isFinite(endMs) && endMs <= Date.now()) {
+      return expireSubscription(cleanId);
+    }
+  }
+
   return sub;
 }
 

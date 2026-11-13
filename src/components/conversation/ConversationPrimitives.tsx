@@ -1124,7 +1124,7 @@ export const CouponCard: React.FC<CouponCardProps> = ({
         <TicketPercent className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <div className="space-y-1 text-xs">
           <div className="font-semibold text-zinc-200">
-            Feedico Partner API · Coupon Status: Coupon validity unknown.
+            Verified Coupon Intelligence · Coupon Status: Coupon validity unknown.
           </div>
           <p className="text-zinc-400 leading-relaxed">{subsystemState}</p>
         </div>
@@ -1198,7 +1198,7 @@ export const CouponCard: React.FC<CouponCardProps> = ({
 
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-400 font-mono">
                   <span>
-                    Source: {item.originalSource || 'Feedico Partner API'}
+                    Source: {item.originalSource || 'Verified Merchant Offer'}
                     {item.provider ? ` (${item.provider})` : ''}
                   </span>
                   <span>·</span>

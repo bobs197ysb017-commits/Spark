@@ -367,8 +367,8 @@ function resolveRawFeedicoTokenFromEnv(
  */
 export function getFeedicoConfig(envOverrides?: Partial<Record<string, string | undefined>>): FeedicoConfig {
   const env = { ...process.env, ...(envOverrides || {}) };
-  const rawEnabled = (env.FEEDICO_ENABLED ?? 'true').trim().toLowerCase();
-  const enabled = rawEnabled !== 'false' && rawEnabled !== '0' && rawEnabled !== 'no';
+  const rawEnabled = (env.FEEDICO_ENABLED ?? 'false').trim().toLowerCase();
+  const enabled = rawEnabled === 'true' || rawEnabled === '1' || rawEnabled === 'yes';
 
   const hasExplicitTokenOverride = Boolean(
     envOverrides && Object.prototype.hasOwnProperty.call(envOverrides, 'FEEDICO_PARTNER_TOKEN')

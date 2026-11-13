@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowDownToLine,
   ArrowUpDown,
@@ -20,6 +20,7 @@ import type {
   RankedProductOffer,
   SubscriptionQuotaStatus,
 } from '../../types/spark';
+import { buildAuthenticatedHeaders } from '../../utils/authClient';
 
 interface AgGridAnalyticsWorkspaceProps {
   savedProducts: RankedProductOffer[];
@@ -76,21 +77,65 @@ export const AgGridAnalyticsWorkspace: React.FC<AgGridAnalyticsWorkspaceProps> =
   const [pageSize, setPageSize] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  const handleSelectTab = useCallback((tab: AgGridWorkspaceView) => {
-    setActiveTab(tab);
-    setSortField(null);
-    setCurrentPage(1);
-    try {
-      localStorage.setItem('spark_ag_default_tab', tab);
-    } catch {
-      // Ignore
-    }
-    fetch('/api/subscriptions/dashboard-preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ defaultTab: tab, pageSize: 10 }),
-    }).catch(() => {});
+  const persistDashboardPrefs = useCallback(
+    (tab: AgGridWorkspaceView, size: number) => {
+      try {
+        localStorage.setItem('spark_ag_default_tab', tab);
+      } catch {
+        // Ignore
+      }
+      fetch('/api/subscriptions/dashboard-preferences', {
+        method: 'PUT',
+        headers: buildAuthenticatedHeaders({ method: 'PUT' }),
+        credentials: 'include',
+        body: JSON.stringify({ defaultTab: tab, pageSize: size }),
+      }).catch(() => {});
+    },
+    []
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    fetch('/api/subscriptions/analytics', {
+      headers: buildAuthenticatedHeaders({ method: 'GET' }),
+      credentials: 'include',
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!mounted || !data?.dashboardPreferences) return;
+        const prefTab = data.dashboardPreferences.defaultTab as AgGridWorkspaceView | undefined;
+        const prefSize = Number(data.dashboardPreferences.pageSize);
+        if (
+          prefTab &&
+          [
+            'saved_products',
+            'comparison_matrix',
+            'purchase_ledger',
+            'coupon_savings',
+            'quota_usage',
+          ].includes(prefTab)
+        ) {
+          setActiveTab(prefTab);
+        }
+        if ([10, 25, 50, 100].includes(prefSize)) {
+          setPageSize(prefSize);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  const handleSelectTab = useCallback(
+    (tab: AgGridWorkspaceView) => {
+      setActiveTab(tab);
+      setSortField(null);
+      setCurrentPage(1);
+      persistDashboardPrefs(tab, pageSize);
+    },
+    [pageSize, persistDashboardPrefs]
+  );
 
   // Quick summary KPIs
   const totalPurchaseVolume = useMemo(() => {
@@ -329,7 +374,8 @@ export const AgGridAnalyticsWorkspace: React.FC<AgGridAnalyticsWorkspaceProps> =
         field: 'estimatedSavingsUsd',
         headerName: 'Est. Savings',
         sortable: true,
-        valueFormatter: (_row, val) => (val ? `$${Number(val).toFixed(2)}` : '$5.00'),
+        valueFormatter: (_row, val) =>
+          typeof val === 'number' && Number.isFinite(val) ? `$${val.toFixed(2)}` : '—',
       },
     ],
     []
@@ -458,11 +504,16 @@ export const AgGridAnalyticsWorkspace: React.FC<AgGridAnalyticsWorkspaceProps> =
       rows = [...rows].sort((a, b) => {
         const va = a[sortField];
         const vb = b[sortField];
+        const aMissing = va === null || va === undefined || va === '';
+        const bMissing = vb === null || vb === undefined || vb === '';
+        if (aMissing && bMissing) return 0;
+        if (aMissing) return 1;
+        if (bMissing) return -1;
         if (typeof va === 'number' && typeof vb === 'number') {
           return sortDirection === 'asc' ? va - vb : vb - va;
         }
-        const sa = String(va ?? '').toLowerCase();
-        const sb = String(vb ?? '').toLowerCase();
+        const sa = String(va).toLowerCase();
+        const sb = String(vb).toLowerCase();
         return sortDirection === 'asc' ? sa.localeCompare(sb) : sb.localeCompare(sa);
       });
     }
@@ -518,11 +569,11 @@ export const AgGridAnalyticsWorkspace: React.FC<AgGridAnalyticsWorkspaceProps> =
       {/* Top Banner & KPI Metrics */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <h1 className="text-2xl font-bold tracking-tight text-white">
               Intelligent Analytics Workspace
             </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-violet-500/15 text-violet-300 border border-violet-500/30">
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-violet-500/15 text-violet-300 border border-violet-500/30 whitespace-nowrap shrink-0">
               Spark Tabular Engine
             </span>
           </div>
@@ -711,26 +762,41 @@ export const AgGridAnalyticsWorkspace: React.FC<AgGridAnalyticsWorkspaceProps> =
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-white/[0.08] bg-zinc-900/60">
-                {activeColDefs.map((col) => (
-                  <th
-                    key={col.field}
-                    onClick={() => handleSort(col.field, col.sortable)}
-                    className={`px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 select-none ${
-                      col.sortable ? 'cursor-pointer hover:text-white' : ''
-                    }`}
-                  >
-                    <div className="inline-flex items-center gap-1.5">
-                      <span>{col.headerName}</span>
-                      {col.sortable && (
-                        <ArrowUpDown
-                          className={`w-3 h-3 ${
-                            sortField === col.field ? 'text-violet-400' : 'text-zinc-600'
-                          }`}
-                        />
+                {activeColDefs.map((col) => {
+                  const isSorted = sortField === col.field;
+                  return (
+                    <th
+                      key={col.field}
+                      aria-sort={
+                        col.sortable
+                          ? isSorted
+                            ? sortDirection === 'asc'
+                              ? 'ascending'
+                              : 'descending'
+                            : 'none'
+                          : undefined
+                      }
+                      className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 select-none"
+                    >
+                      {col.sortable ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSort(col.field, col.sortable)}
+                          className="inline-flex items-center gap-1.5 hover:text-white cursor-pointer uppercase tracking-wider font-semibold"
+                        >
+                          <span>{col.headerName}</span>
+                          <ArrowUpDown
+                            className={`w-3 h-3 ${
+                              isSorted ? 'text-violet-400' : 'text-zinc-600'
+                            }`}
+                          />
+                        </button>
+                      ) : (
+                        <span>{col.headerName}</span>
                       )}
-                    </div>
-                  </th>
-                ))}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.06] text-xs text-zinc-200">
@@ -773,10 +839,13 @@ export const AgGridAnalyticsWorkspace: React.FC<AgGridAnalyticsWorkspaceProps> =
           <div className="flex items-center gap-2">
             <span>Rows per page:</span>
             <select
+              aria-label="Rows per page"
               value={pageSize}
               onChange={(e) => {
-                setPageSize(Number(e.target.value));
+                const nextSize = Number(e.target.value);
+                setPageSize(nextSize);
                 setCurrentPage(1);
+                persistDashboardPrefs(activeTab, nextSize);
               }}
               className="bg-zinc-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-zinc-200 focus:outline-none"
             >
@@ -796,6 +865,7 @@ export const AgGridAnalyticsWorkspace: React.FC<AgGridAnalyticsWorkspaceProps> =
           <div className="flex items-center gap-1.5">
             <button
               type="button"
+              aria-label="Previous page"
               disabled={safePage <= 1}
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-300 disabled:opacity-40 cursor-pointer"
@@ -807,6 +877,7 @@ export const AgGridAnalyticsWorkspace: React.FC<AgGridAnalyticsWorkspaceProps> =
             </span>
             <button
               type="button"
+              aria-label="Next page"
               disabled={safePage >= totalPages}
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-300 disabled:opacity-40 cursor-pointer"

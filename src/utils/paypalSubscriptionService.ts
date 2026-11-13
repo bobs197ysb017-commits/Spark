@@ -7,6 +7,7 @@ import {
 import {
   SPARK_SUBSCRIPTION_PLANS,
   expireSubscription,
+  getSubscriptionPayments,
   getUserSubscription,
   markSubscriptionFailedRenewal,
   recordSubscriptionPayment,
@@ -66,8 +67,9 @@ export const PAYPAL_BILLING_PLANS: Record<SubscriptionPlanId, PayPalBillingPlanD
 export interface CreateSubscriptionResponse {
   ok: boolean;
   subscriptionId: string;
+  paypalOrderId?: string;
   planId: SubscriptionPlanId;
-  status: 'APPROVAL_PENDING' | 'ACTIVE' | 'ERROR';
+  status: 'APPROVAL_PENDING' | 'APPROVED' | 'ACTIVE' | 'CANCELLED' | 'ERROR';
   approvalUrl: string;
   environment: 'sandbox' | 'live';
   billingMode: 'paypal_recurring_subscriptions_api' | 'paypal_sandbox_verified_billing';
@@ -108,17 +110,25 @@ export interface PayPalWebhookEvent {
   };
 }
 
-const pendingSubscriptionApprovals = new Map<
-  string,
-  {
-    subscriptionId: string;
-    userId: string;
-    planId: SubscriptionPlanId;
-    amount: number;
-    createdAt: string;
-    activated: boolean;
-  }
->();
+interface PendingSubscriptionApprovalSession {
+  subscriptionId: string;
+  paypalOrderId: string;
+  approvalUrl: string;
+  userId: string;
+  planId: SubscriptionPlanId;
+  amount: number;
+  createdAt: string;
+  approved: boolean;
+  approvedAt?: string;
+  payerId?: string;
+  cancelled: boolean;
+  cancelledAt?: string;
+  activated: boolean;
+  activatedAt?: string;
+  paymentId?: string;
+}
+
+const pendingSubscriptionApprovals = new Map<string, PendingSubscriptionApprovalSession>();
 
 const processedSubscriptionWebhookIds = new Set<string>();
 
@@ -132,7 +142,7 @@ export function evaluatePayPalSubscriptionEligibility() {
   const hasSecret = Boolean(
     process.env.PAYPAL_CLIENT_SECRET && !process.env.PAYPAL_CLIENT_SECRET.includes('YOUR_')
   );
-  const isLive = process.env.PAYPAL_ENVIRONMENT === 'live';
+  const isLive = (process.env.PAYPAL_ENV || 'sandbox').trim().toLowerCase() === 'live';
   const livePlanConfigured = Boolean(
     process.env.PAYPAL_PLAN_ID_LUNA &&
       process.env.PAYPAL_PLAN_ID_TERRA &&
@@ -203,33 +213,121 @@ export function createPayPalSubscription(params: {
   }
 
   const subscriptionId = `I-SPARK-${planId.toUpperCase()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-  const isLive = eligibility.environment === 'live';
-  const baseUrl = isLive
-    ? 'https://www.paypal.com/webapps/billing/subscriptions'
-    : 'https://www.sandbox.paypal.com/webapps/billing/subscriptions';
-
-  const approvalUrl = `${baseUrl}?ba_token=BA-${subscriptionId}&plan_id=${planDesc.paypalPlanId}`;
+  const paypalOrderId = `PP-SUB-ORD-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+  const approvalUrl = `https://www.sandbox.paypal.com/checkoutnow?token=${encodeURIComponent(paypalOrderId)}&plan_id=${encodeURIComponent(planDesc.paypalPlanId)}`;
 
   pendingSubscriptionApprovals.set(subscriptionId, {
     subscriptionId,
+    paypalOrderId,
+    approvalUrl,
     userId,
     planId,
     amount: planDesc.amount,
     createdAt: new Date().toISOString(),
+    approved: false,
+    cancelled: false,
     activated: false,
   });
 
   return {
     ok: true,
     subscriptionId,
+    paypalOrderId,
     planId,
     status: 'APPROVAL_PENDING',
     approvalUrl,
-    environment: eligibility.environment,
+    environment: 'sandbox',
     billingMode: eligibility.activeBillingMode,
     amount: planDesc.amount,
     currency: planDesc.currency,
   };
+}
+
+/**
+ * Records explicit PayPal Sandbox buyer approval for a pending subscription order.
+ */
+export function approvePayPalSubscription(params: {
+  userId: string;
+  subscriptionId: string;
+  payerId?: string;
+}): {
+  ok: boolean;
+  errorCode?: string;
+  error?: string;
+  session?: PendingSubscriptionApprovalSession;
+} {
+  const pending = pendingSubscriptionApprovals.get(params.subscriptionId);
+  if (!pending) {
+    return {
+      ok: false,
+      errorCode: 'subscription_session_not_found',
+      error: 'Subscription approval session not found.',
+    };
+  }
+  if (pending.userId !== params.userId) {
+    return {
+      ok: false,
+      errorCode: 'cross_user_subscription_mismatch',
+      error: 'Subscription session belongs to a different user.',
+    };
+  }
+  if (pending.cancelled) {
+    return {
+      ok: false,
+      errorCode: 'subscription_order_cancelled',
+      error: 'This subscription order was cancelled and cannot be approved.',
+    };
+  }
+  pending.approved = true;
+  pending.approvedAt = pending.approvedAt || new Date().toISOString();
+  if (params.payerId) {
+    pending.payerId = params.payerId;
+  }
+  return { ok: true, session: { ...pending } };
+}
+
+/**
+ * Cancels an uncaptured PayPal Sandbox subscription order cleanly without charging or upgrading.
+ */
+export function cancelPendingPayPalSubscription(params: {
+  userId: string;
+  subscriptionId: string;
+}): {
+  ok: boolean;
+  errorCode?: string;
+  error?: string;
+  session?: PendingSubscriptionApprovalSession;
+} {
+  const pending = pendingSubscriptionApprovals.get(params.subscriptionId);
+  if (!pending) {
+    return {
+      ok: false,
+      errorCode: 'subscription_session_not_found',
+      error: 'Subscription session not found.',
+    };
+  }
+  if (pending.userId !== params.userId) {
+    return {
+      ok: false,
+      errorCode: 'cross_user_subscription_mismatch',
+      error: 'Subscription session belongs to a different user.',
+    };
+  }
+  if (pending.activated) {
+    return {
+      ok: false,
+      errorCode: 'subscription_already_activated',
+      error: 'Activated subscriptions must be cancelled via the subscription cancellation flow.',
+    };
+  }
+  pending.cancelled = true;
+  pending.cancelledAt = new Date().toISOString();
+  return { ok: true, session: { ...pending } };
+}
+
+export function getPayPalSubscriptionSession(subscriptionId: string): PendingSubscriptionApprovalSession | null {
+  const found = pendingSubscriptionApprovals.get(subscriptionId);
+  return found ? { ...found } : null;
 }
 
 export interface SubscriptionWalletChargeInput {
@@ -269,11 +367,13 @@ export function activatePayPalSubscription<TWallet = unknown, TTx = unknown, TPu
   planId: SubscriptionPlanId;
   payerId?: string;
   browserRedirectOnly?: boolean;
+  requireExplicitApproval?: boolean;
   chargeWallet?: (
     input: SubscriptionWalletChargeInput
   ) => SubscriptionWalletChargeResult<TWallet, TTx, TPurchase>;
 }): {
   ok: boolean;
+  alreadyActivated?: boolean;
   subscription?: UserSubscriptionRecord;
   payment?: SubscriptionPaymentRecord;
   buyerWallet?: TWallet;
@@ -284,7 +384,16 @@ export function activatePayPalSubscription<TWallet = unknown, TTx = unknown, TPu
   errorCode?: string;
   error?: string;
 } {
-  const { userId, userEmail, subscriptionId, planId, payerId, browserRedirectOnly, chargeWallet } = params;
+  const {
+    userId,
+    userEmail,
+    subscriptionId,
+    planId,
+    payerId,
+    browserRedirectOnly,
+    requireExplicitApproval,
+    chargeWallet,
+  } = params;
 
   // Security Rule: Never activate a paid plan from a browser redirect alone without server verification
   if (browserRedirectOnly && planId !== 'free') {
@@ -296,6 +405,30 @@ export function activatePayPalSubscription<TWallet = unknown, TTx = unknown, TPu
   }
 
   const pending = pendingSubscriptionApprovals.get(subscriptionId);
+  if (requireExplicitApproval && planId !== 'free') {
+    if (!pending) {
+      return {
+        ok: false,
+        errorCode: 'subscription_session_not_found',
+        error: 'No pending PayPal Sandbox subscription order found for this subscription ID.',
+      };
+    }
+    if (pending.cancelled) {
+      return {
+        ok: false,
+        errorCode: 'subscription_order_cancelled',
+        error: 'Subscription order was cancelled before approval and cannot be captured.',
+      };
+    }
+    if (!pending.approved) {
+      return {
+        ok: false,
+        errorCode: 'subscription_not_approved',
+        error: 'Buyer approval in PayPal Sandbox is required before activating this paid subscription.',
+      };
+    }
+  }
+
   if (pending) {
     if (pending.userId !== userId) {
       return {
@@ -309,6 +442,17 @@ export function activatePayPalSubscription<TWallet = unknown, TTx = unknown, TPu
         ok: false,
         errorCode: 'plan_tampering_detected',
         error: `Subscription was created for ${pending.planId}, not ${planId}.`,
+      };
+    }
+    if (pending.activated) {
+      const existingSub = getUserSubscription(userId);
+      const existingPayments = getSubscriptionPayments(userId);
+      const existingPayment = existingPayments.find((p) => p.subscriptionId === subscriptionId);
+      return {
+        ok: true,
+        alreadyActivated: true,
+        subscription: existingSub,
+        payment: existingPayment,
       };
     }
   }
@@ -327,7 +471,7 @@ export function activatePayPalSubscription<TWallet = unknown, TTx = unknown, TPu
       amount,
       currency: 'USD',
       subscriptionId,
-      payerId,
+      payerId: payerId || pending?.payerId,
     });
     if (!walletChargeResult.ok) {
       return {
@@ -348,10 +492,6 @@ export function activatePayPalSubscription<TWallet = unknown, TTx = unknown, TPu
     planDesc?.paypalPlanId || null
   );
 
-  if (pending) {
-    pending.activated = true;
-  }
-
   const paymentRecord: SubscriptionPaymentRecord = {
     id: `pay_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
     subscriptionId,
@@ -364,6 +504,12 @@ export function activatePayPalSubscription<TWallet = unknown, TTx = unknown, TPu
       walletChargeResult?.captureId || `TXN-${crypto.randomBytes(6).toString('hex').toUpperCase()}`,
     createdAt: new Date().toISOString(),
   };
+
+  if (pending) {
+    pending.activated = true;
+    pending.activatedAt = new Date().toISOString();
+    pending.paymentId = paymentRecord.id;
+  }
 
   recordSubscriptionPayment(paymentRecord);
 
