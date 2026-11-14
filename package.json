@@ -10,8 +10,10 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "security:test": "tsx --test src/utils/securityHardening.test.ts src/utils/paypalSandboxService.test.ts src/utils/cartSystem.test.ts src/utils/agentShoppingExecutionE2E.test.ts src/utils/feedicoService.test.ts src/utils/shoppingLogic.test.ts src/utils/subscriptionQuota.test.ts src/utils/sparkProductIntelligenceAgent.test.ts firestore.rules.test.ts",
-    "security:gate": "tsc --noEmit && npx eslint firestore.rules && tsx --test src/utils/securityHardening.test.ts src/utils/paypalSandboxService.test.ts src/utils/cartSystem.test.ts src/utils/agentShoppingExecutionE2E.test.ts src/utils/feedicoService.test.ts src/utils/shoppingLogic.test.ts src/utils/subscriptionQuota.test.ts src/utils/sparkProductIntelligenceAgent.test.ts firestore.rules.test.ts"
+    "test": "tsx --test src/utils/securityHardening.test.ts src/utils/paypalSandboxService.test.ts src/utils/cartSystem.test.ts src/utils/agentShoppingExecutionE2E.test.ts src/utils/feedicoService.test.ts src/utils/shoppingLogic.test.ts src/utils/subscriptionQuota.test.ts src/utils/sparkProductIntelligenceAgent.test.ts firestore.rules.test.ts",
+    "test:commercial": "tsx --test src/utils/phase6CommercialValidation.test.ts",
+    "security:test": "tsx --test src/utils/securityHardening.test.ts src/utils/paypalSandboxService.test.ts src/utils/cartSystem.test.ts src/utils/agentShoppingExecutionE2E.test.ts src/utils/feedicoService.test.ts src/utils/shoppingLogic.test.ts src/utils/subscriptionQuota.test.ts src/utils/sparkProductIntelligenceAgent.test.ts src/utils/phase6CommercialValidation.test.ts firestore.rules.test.ts",
+    "security:gate": "tsc --noEmit && npx eslint firestore.rules && npm run security:test"
   },
   "dependencies": {
     "@google/genai": "^3.0.0",

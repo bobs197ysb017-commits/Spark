@@ -22,7 +22,11 @@ import type {
   UserProfile,
 } from '../../types/spark';
 import { buildAuthenticatedHeaders } from '../../utils/authClient';
-import { syncUserSubscriptionToFirestore } from '../../firebase';
+import {
+  persistSubscriptionPaymentToFirestore,
+  syncUserSubscriptionToFirestore,
+  syncUserUsageQuotaToFirestoreAtomic,
+} from '../../firebase';
 
 interface SubscriptionPlansViewProps {
   user: UserProfile;
@@ -65,18 +69,12 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
   const fetchBuyerWallet = useCallback(async () => {
     try {
       const [meRes, analyticsRes] = await Promise.all([
-        fetch(`/api/subscriptions/me?userId=${encodeURIComponent(user.id)}`, {
-          headers: buildAuthenticatedHeaders({
-            method: 'GET',
-            extraHeaders: { 'x-spark-user-id': user.id },
-          }),
+        fetch('/api/subscriptions/me', {
+          headers: buildAuthenticatedHeaders({ method: 'GET' }),
           credentials: 'include',
         }),
-        fetch(`/api/subscriptions/analytics?userId=${encodeURIComponent(user.id)}`, {
-          headers: buildAuthenticatedHeaders({
-            method: 'GET',
-            extraHeaders: { 'x-spark-user-id': user.id },
-          }),
+        fetch('/api/subscriptions/analytics', {
+          headers: buildAuthenticatedHeaders({ method: 'GET' }),
           credentials: 'include',
         }),
       ]);
@@ -93,7 +91,23 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
             billingCycle: 'monthly',
             monthlyPriceUsd: data.quotaStatus.plan?.priceMonthly || 0,
             paypalSubscriptionId: sub.paypalSubscriptionId || null,
+            paypalPlanId: sub.paypalPlanId || null,
             cancelAtPeriodEnd: Boolean(sub.cancelAtPeriodEnd),
+          });
+        }
+        if (data.quotaStatus?.usage) {
+          const u = data.quotaStatus.usage;
+          void syncUserUsageQuotaToFirestoreAtomic(user.id, {
+            periodId: `period-${u.billingPeriodMonth || new Date().toISOString().slice(0, 7)}`,
+            periodStart: data.quotaStatus.subscription?.currentPeriodStart || new Date().toISOString(),
+            periodEnd: data.quotaStatus.subscription?.currentPeriodEnd || new Date().toISOString(),
+            searchesUsed: Number(u.searchesUsed || 0),
+            comparisonsUsed: Number(u.analysesUsed || 0),
+            checkoutsUsed: Number(u.workflowsUsed || 0),
+            CsvExportsUsed: Number(u.couponsUsed || 0),
+            agentTokensUsed: Number(u.totalTokensEstimated || 0),
+            estimatedCostUsd: Number(u.totalEstimatedCostUsd || 0),
+            revision: Number(u.revision || 1),
           });
         }
       }
@@ -242,7 +256,6 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
         credentials: 'include',
         body: JSON.stringify({
           subscriptionId: pendingSubSession.subscriptionId,
-          userId: user.id,
         }),
       }).catch(() => {});
     }
@@ -262,8 +275,6 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
         credentials: 'include',
         body: JSON.stringify({
           planId: selectedPlanForCheckout.id,
-          userId: user.id,
-          userEmail: user.email,
         }),
       });
 
@@ -273,15 +284,12 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
       }
 
       if (selectedPlanForCheckout.priceMonthly === 0) {
-        const activateRes = await fetch('/api/subscriptions/activate', {
+        const activateRes = await fetch('/api/subscriptions/change-plan', {
           method: 'POST',
           headers: buildAuthenticatedHeaders({ method: 'POST' }),
           credentials: 'include',
           body: JSON.stringify({
-            planId: selectedPlanForCheckout.id,
-            subscriptionId: createData.subscriptionId,
-            userId: user.id,
-            userEmail: user.email,
+            newPlanId: 'free',
           }),
         });
         const activateData = await activateRes.json();
@@ -330,7 +338,6 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
         credentials: 'include',
         body: JSON.stringify({
           subscriptionId: pendingSubSession.subscriptionId,
-          userId: user.id,
           payerId,
         }),
       });
@@ -339,7 +346,7 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
         throw new Error(approveData.error || 'Failed to confirm PayPal Sandbox buyer approval.');
       }
 
-      // 2. Activate subscription & deduct plan charge from PayPal wallet
+      // 2. Activate subscription & deduct plan charge from PayPal wallet (server enforces approval verification)
       const activateRes = await fetch('/api/subscriptions/activate', {
         method: 'POST',
         headers: buildAuthenticatedHeaders({ method: 'POST' }),
@@ -347,10 +354,7 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
         body: JSON.stringify({
           planId: selectedPlanForCheckout.id,
           subscriptionId: pendingSubSession.subscriptionId,
-          userId: user.id,
-          userEmail: user.email,
           payerId,
-          requireExplicitApproval: true,
         }),
       });
 
@@ -360,6 +364,22 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
       }
       if (!activateRes.ok || !activateData.ok) {
         throw new Error(activateData.error || 'Failed to activate PayPal subscription.');
+      }
+
+      if (activateData.payment) {
+        void persistSubscriptionPaymentToFirestore(user.id, {
+          paymentId: activateData.payment.id || `PAY-${Date.now()}`,
+          subscriptionId: pendingSubSession.subscriptionId,
+          planId: selectedPlanForCheckout.id,
+          amountUsd: selectedPlanForCheckout.priceMonthly,
+          currency: 'USD',
+          status: 'COMPLETED',
+          settlementMode: activateData.settlementMode || 'SANDBOX_WALLET_SIMULATION',
+          paypalOrderId: pendingSubSession.subscriptionId,
+          paypalCaptureId: activateData.payment.paypalTransactionId || `CAP-${Date.now()}`,
+          billingPeriod: 'monthly',
+          description: `${selectedPlanForCheckout.name} subscription activated`,
+        });
       }
 
       const newWalletBal =
@@ -401,7 +421,7 @@ export const SubscriptionPlansView: React.FC<SubscriptionPlansViewProps> = ({
         method: 'POST',
         headers: buildAuthenticatedHeaders({ method: 'POST' }),
         credentials: 'include',
-        body: JSON.stringify({ userId: user.id }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (res.ok && data.ok) {

@@ -397,6 +397,9 @@ service cloud.firestore {
           'billingCycle',
           'monthlyPriceUsd',
           'paypalSubscriptionId',
+          'paypalPlanId',
+          'settlementMode',
+          'upstreamPayPalStatus',
           'cancelAtPeriodEnd',
           'createdAt',
           'updatedAt'
@@ -408,8 +411,160 @@ service cloud.firestore {
         data.billingCycle is string && data.billingCycle.size() <= 32 &&
         (data.monthlyPriceUsd is number || data.monthlyPriceUsd is int) && data.monthlyPriceUsd >= 0 &&
         (!('paypalSubscriptionId' in data) || (data.paypalSubscriptionId is string && data.paypalSubscriptionId.size() <= 128)) &&
+        (!('paypalPlanId' in data) || (data.paypalPlanId is string && data.paypalPlanId.size() <= 128)) &&
+        (!('settlementMode' in data) || (data.settlementMode is string && (data.settlementMode == 'PAYPAL_UPSTREAM_CAPTURED' || data.settlementMode == 'SANDBOX_WALLET_SIMULATION' || data.settlementMode == 'FREE_TIER_NO_CHARGE'))) &&
+        (!('upstreamPayPalStatus' in data) || (data.upstreamPayPalStatus is string && data.upstreamPayPalStatus.size() <= 64)) &&
         data.cancelAtPeriodEnd is bool &&
         (!('createdAt' in data) || data.createdAt is timestamp) &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: UserUsageQuotaDoc (/users/{userId}/usage_quotas/{periodId})
+    function isValidUserUsageQuota(data) {
+      return data.keys().hasAll([
+          'userId',
+          'periodId',
+          'periodStart',
+          'periodEnd',
+          'searchesUsed',
+          'comparisonsUsed',
+          'checkoutsUsed',
+          'CsvExportsUsed',
+          'agentTokensUsed',
+          'estimatedCostUsd',
+          'revision',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'periodId',
+          'periodStart',
+          'periodEnd',
+          'searchesUsed',
+          'comparisonsUsed',
+          'checkoutsUsed',
+          'CsvExportsUsed',
+          'agentTokensUsed',
+          'estimatedCostUsd',
+          'activeReservationsCount',
+          'revision',
+          'updatedAt'
+        ]) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.periodId is string && data.periodId.size() >= 1 && data.periodId.size() <= 64 &&
+        data.periodStart is string && data.periodStart.size() >= 10 && data.periodStart.size() <= 64 &&
+        data.periodEnd is string && data.periodEnd.size() >= 10 && data.periodEnd.size() <= 64 &&
+        data.searchesUsed is int && data.searchesUsed >= 0 && data.searchesUsed <= 1000000 &&
+        data.comparisonsUsed is int && data.comparisonsUsed >= 0 && data.comparisonsUsed <= 1000000 &&
+        data.checkoutsUsed is int && data.checkoutsUsed >= 0 && data.checkoutsUsed <= 1000000 &&
+        data.CsvExportsUsed is int && data.CsvExportsUsed >= 0 && data.CsvExportsUsed <= 1000000 &&
+        data.agentTokensUsed is int && data.agentTokensUsed >= 0 && data.agentTokensUsed <= 1000000000 &&
+        (data.estimatedCostUsd is number || data.estimatedCostUsd is int) && data.estimatedCostUsd >= 0 &&
+        (!('activeReservationsCount' in data) || (data.activeReservationsCount is int && data.activeReservationsCount >= 0 && data.activeReservationsCount <= 10000)) &&
+        data.revision is int && data.revision >= 1 && data.revision <= 1000000000 &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: SubscriptionPaymentDoc (/users/{userId}/subscription_payments/{paymentId})
+    function isValidSubscriptionPayment(data) {
+      return data.keys().hasAll([
+          'paymentId',
+          'subscriptionId',
+          'userId',
+          'planId',
+          'amountUsd',
+          'currency',
+          'status',
+          'settlementMode',
+          'paypalOrderId',
+          'paypalCaptureId',
+          'billingPeriod',
+          'description',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'paymentId',
+          'subscriptionId',
+          'userId',
+          'planId',
+          'amountUsd',
+          'currency',
+          'status',
+          'settlementMode',
+          'upstreamPayPalResourceId',
+          'upstreamPayPalStatus',
+          'paypalOrderId',
+          'paypalCaptureId',
+          'walletBalanceBeforeUsd',
+          'walletBalanceAfterUsd',
+          'billingPeriod',
+          'description',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.paymentId is string && data.paymentId.size() >= 1 && data.paymentId.size() <= 128 &&
+        data.subscriptionId is string && data.subscriptionId.size() >= 1 && data.subscriptionId.size() <= 128 &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.planId is string && (data.planId == 'free' || data.planId == 'luna' || data.planId == 'terra' || data.planId == 'sol') &&
+        (data.amountUsd is number || data.amountUsd is int) && data.amountUsd >= 0 &&
+        data.currency is string && data.currency == 'USD' &&
+        data.status is string && (data.status == 'COMPLETED' || data.status == 'REFUNDED' || data.status == 'FAILED' || data.status == 'PENDING_APPROVAL') &&
+        data.settlementMode is string && (data.settlementMode == 'PAYPAL_UPSTREAM_CAPTURED' || data.settlementMode == 'SANDBOX_WALLET_SIMULATION' || data.settlementMode == 'FREE_TIER_NO_CHARGE') &&
+        data.paypalOrderId is string && data.paypalOrderId.size() >= 1 && data.paypalOrderId.size() <= 128 &&
+        data.paypalCaptureId is string && data.paypalCaptureId.size() >= 1 && data.paypalCaptureId.size() <= 128 &&
+        data.billingPeriod is string && (data.billingPeriod == 'monthly' || data.billingPeriod == 'annual') &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 512 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: SubscriptionApprovalDoc (/users/{userId}/subscription_approvals/{subscriptionId})
+    function isValidSubscriptionApproval(data) {
+      return data.keys().hasAll([
+          'subscriptionId',
+          'paypalOrderId',
+          'userId',
+          'planId',
+          'billingPeriod',
+          'amountUsd',
+          'currency',
+          'status',
+          'settlementMode',
+          'approvalUrl',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'subscriptionId',
+          'paypalOrderId',
+          'paypalPlanId',
+          'userId',
+          'planId',
+          'billingPeriod',
+          'amountUsd',
+          'currency',
+          'status',
+          'upstreamPayPalStatus',
+          'settlementMode',
+          'approvalUrl',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.subscriptionId is string && data.subscriptionId.size() >= 1 && data.subscriptionId.size() <= 128 &&
+        data.paypalOrderId is string && data.paypalOrderId.size() >= 1 && data.paypalOrderId.size() <= 128 &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == request.auth.uid &&
+        data.planId is string && (data.planId == 'free' || data.planId == 'luna' || data.planId == 'terra' || data.planId == 'sol') &&
+        data.billingPeriod is string && (data.billingPeriod == 'monthly' || data.billingPeriod == 'annual') &&
+        (data.amountUsd is number || data.amountUsd is int) && data.amountUsd >= 0 &&
+        data.currency is string && data.currency == 'USD' &&
+        data.status is string && (data.status == 'APPROVAL_PENDING' || data.status == 'APPROVED' || data.status == 'ACTIVE' || data.status == 'CANCELLED' || data.status == 'EXPIRED') &&
+        data.settlementMode is string && (data.settlementMode == 'PAYPAL_UPSTREAM_CAPTURED' || data.settlementMode == 'SANDBOX_WALLET_SIMULATION' || data.settlementMode == 'FREE_TIER_NO_CHARGE') &&
+        data.approvalUrl is string && data.approvalUrl.size() >= 8 && data.approvalUrl.size() <= 1024 &&
+        data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
 
@@ -545,6 +700,65 @@ service cloud.firestore {
         allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(subDocId) &&
           isValidUserSubscription(incoming()) &&
           incoming().userId == existing().userId &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow delete: if false;
+      }
+
+      // 5d. Atomic Usage Quota Counters Subcollection (/users/{userId}/usage_quotas/{periodId})
+      match /usage_quotas/{periodId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(periodId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(periodId) &&
+          isValidUserUsageQuota(incoming()) &&
+          incoming().periodId == periodId &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(periodId) &&
+          isValidUserUsageQuota(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().periodId == existing().periodId &&
+          incoming().revision >= existing().revision &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow delete: if false;
+      }
+
+      // 5e. Subscription Payment Audit Records (/users/{userId}/subscription_payments/{paymentId})
+      match /subscription_payments/{paymentId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(paymentId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(paymentId) &&
+          isValidSubscriptionPayment(incoming()) &&
+          incoming().paymentId == paymentId &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(paymentId) &&
+          isValidSubscriptionPayment(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().paymentId == existing().paymentId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow delete: if false;
+      }
+
+      // 5f. Subscription Approval Sessions (/users/{userId}/subscription_approvals/{subscriptionId})
+      match /subscription_approvals/{subscriptionId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(subscriptionId) && (resource == null || existing().userId == request.auth.uid);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(subscriptionId) &&
+          isValidSubscriptionApproval(incoming()) &&
+          incoming().subscriptionId == subscriptionId &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          parentUserExists(userId);
+        allow update: if isVerifiedUser() && isOwner(userId) && isValidId(userId) && isValidId(subscriptionId) &&
+          isValidSubscriptionApproval(incoming()) &&
+          incoming().userId == existing().userId &&
+          incoming().subscriptionId == existing().subscriptionId &&
+          incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
           parentUserExists(userId);
         allow delete: if false;

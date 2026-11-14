@@ -116,6 +116,7 @@ import {
   importSubscriptionData,
   recordFeatureUsage,
   releaseConcurrency,
+  releaseFeatureQuotaReservation,
   reserveFeatureQuota,
   saveUserDashboardPreferences,
   setUserSubscriptionPlan,
@@ -124,11 +125,15 @@ import {
   PAYPAL_BILLING_PLANS,
   activatePayPalSubscription,
   approvePayPalSubscription,
+  approvePayPalSubscriptionLive,
   cancelPendingPayPalSubscription,
   changePayPalSubscriptionPlan,
   createPayPalSubscription,
+  createPayPalSubscriptionLive,
   evaluatePayPalSubscriptionEligibility,
+  exportPendingSubscriptionSessions,
   handlePayPalSubscriptionWebhook,
+  importPendingSubscriptionSessions,
 } from './src/utils/paypalSubscriptionService.ts';
 
 // Load .env without clobbering non-empty runtime environment variables injected by Cloud Run / Secret Manager
@@ -643,6 +648,7 @@ async function startServer() {
         savedComparisons: Array.from(savedComparisonsByUserId.entries()),
         paypalLinking: paypalSandboxEngine.exportAccountLinkingState(),
         subscriptionData: exportAllSubscriptionData(),
+        pendingSubscriptionSessions: exportPendingSubscriptionSessions(),
       };
       fs.writeFileSync(runtimeStatePath, JSON.stringify(payload), { mode: 0o600 });
     } catch {
@@ -699,6 +705,9 @@ async function startServer() {
       }
       if (raw.subscriptionData) {
         importSubscriptionData(raw.subscriptionData);
+      }
+      if (Array.isArray(raw.pendingSubscriptionSessions)) {
+        importPendingSubscriptionSessions(raw.pendingSubscriptionSessions);
       }
     }
   } catch {
@@ -4864,25 +4873,19 @@ async function startServer() {
     });
   });
 
-  // 2. Get Current User Active Subscription, Quotas & Concurrency
+  // 2. Get Current User Active Subscription, Quotas & Concurrency (Strictly Authenticated)
   app.get('/api/subscriptions/me', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    // Enforce authenticated session user ID when signed in to prevent client-side manipulation
-    const targetUserId =
-      auth?.user?.id ||
-      (req.header('x-spark-user-id') as string) ||
-      (req.query.userId as string) ||
-      latestActiveUserId ||
-      'anonymous_user';
-    const targetEmail =
-      auth?.user?.email || usersById.get(targetUserId)?.email || 'member@spark.app';
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
+    const targetEmail = auth.user.email;
 
     const quotaStatus = getUserQuotaStatus(targetUserId);
     const buyerWallet = paypalSandboxEngine.getBuyerSandboxWallet(targetUserId, targetEmail);
     const balanceRes = paypalSandboxEngine.getAccountBalanceForUser({
       authenticatedUserId: targetUserId,
       userEmail: targetEmail,
-      preferredCurrency: auth?.user?.preferences?.defaultCurrency || 'USD',
+      preferredCurrency: auth.user.preferences?.defaultCurrency || 'USD',
       autoInitializeSandboxWallet: true,
     });
 
@@ -4896,14 +4899,14 @@ async function startServer() {
     });
   });
 
-  // 3. Create / Initiate PayPal Subscription Session
-  app.post('/api/subscriptions/create', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    const targetUserId =
-      auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
-    const targetEmail = auth?.user?.email || (req.body?.userEmail as string) || 'member@spark.app';
+  // 3. Create / Initiate Real PayPal Sandbox Subscription Session (Strictly Authenticated)
+  app.post('/api/subscriptions/create', async (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
+    const targetEmail = auth.user.email;
 
-    const { planId } = req.body || {};
+    const { planId, returnUrl, cancelUrl } = req.body || {};
     if (!planId || !['free', 'luna', 'terra', 'sol'].includes(planId)) {
       res.status(400).json({
         ok: false,
@@ -4913,10 +4916,12 @@ async function startServer() {
       return;
     }
 
-    const session = createPayPalSubscription({
+    const session = await createPayPalSubscriptionLive({
       userId: targetUserId,
       userEmail: targetEmail,
       planId,
+      returnUrl: typeof returnUrl === 'string' ? returnUrl : undefined,
+      cancelUrl: typeof cancelUrl === 'string' ? cancelUrl : undefined,
     });
 
     saveRuntimeSnapshot();
@@ -4926,11 +4931,11 @@ async function startServer() {
     });
   });
 
-  // 3B. Record Explicit PayPal Sandbox Buyer Approval for Pending Subscription
-  app.post('/api/subscriptions/approve', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    const targetUserId =
-      auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
+  // 3B. Record Explicit PayPal Sandbox Buyer Approval for Pending Subscription (Strictly Authenticated)
+  app.post('/api/subscriptions/approve', async (req, res) => {
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
     const { subscriptionId, payerId } = req.body || {};
 
     if (!subscriptionId || typeof subscriptionId !== 'string') {
@@ -4942,7 +4947,7 @@ async function startServer() {
       return;
     }
 
-    const approved = approvePayPalSubscription({
+    const approved = await approvePayPalSubscriptionLive({
       userId: targetUserId,
       subscriptionId: subscriptionId.trim(),
       payerId: typeof payerId === 'string' ? payerId : undefined,
@@ -4956,11 +4961,11 @@ async function startServer() {
     res.json(approved);
   });
 
-  // 3C. Cancel Uncaptured Pending PayPal Sandbox Subscription
+  // 3C. Cancel Uncaptured Pending PayPal Sandbox Subscription (Strictly Authenticated)
   app.post('/api/subscriptions/cancel-pending', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    const targetUserId =
-      auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
     const { subscriptionId } = req.body || {};
 
     if (!subscriptionId || typeof subscriptionId !== 'string') {
@@ -4985,19 +4990,14 @@ async function startServer() {
     res.json(cancelled);
   });
 
-  // 4. Activate PayPal Subscription upon Buyer Approval (Server-Verified & Deducted from PayPal Wallet)
+  // 4. Activate PayPal Subscription upon Buyer Approval (Strictly Authenticated & Unconditionally Server-Verified)
   app.post('/api/subscriptions/activate', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    const targetUserId =
-      auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
-    const targetEmail =
-      auth?.user?.email ||
-      (req.body?.userEmail as string) ||
-      usersById.get(targetUserId)?.email ||
-      'member@spark.app';
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
+    const targetEmail = auth.user.email;
 
-    const { planId, subscriptionId, payerId, browserRedirectOnly, requireExplicitApproval } =
-      req.body || {};
+    const { planId, subscriptionId, payerId, browserRedirectOnly } = req.body || {};
     if (!planId || !['free', 'luna', 'terra', 'sol'].includes(planId)) {
       res.status(400).json({
         ok: false,
@@ -5007,14 +5007,15 @@ async function startServer() {
       return;
     }
 
+    // SECURITY: Always enforce requireExplicitApproval: true on the server regardless of client payload
     const result = activatePayPalSubscription({
       userId: targetUserId,
       userEmail: targetEmail,
-      subscriptionId: subscriptionId || `I-SPARK-${Date.now()}`,
+      subscriptionId: typeof subscriptionId === 'string' ? subscriptionId.trim() : '',
       planId,
       payerId,
       browserRedirectOnly: Boolean(browserRedirectOnly),
-      requireExplicitApproval: Boolean(requireExplicitApproval),
+      requireExplicitApproval: true,
       chargeWallet: (chargeInput) =>
         paypalSandboxEngine.chargeSubscriptionPlanFromPayPalWallet(chargeInput),
     });
@@ -5022,7 +5023,7 @@ async function startServer() {
     const balanceRes = paypalSandboxEngine.getAccountBalanceForUser({
       authenticatedUserId: targetUserId,
       userEmail: targetEmail,
-      preferredCurrency: auth?.user?.preferences?.defaultCurrency || 'USD',
+      preferredCurrency: auth.user.preferences?.defaultCurrency || 'USD',
       autoInitializeSandboxWallet: true,
     });
 
@@ -5041,6 +5042,8 @@ async function startServer() {
       ok: true,
       subscription: result.subscription,
       payment: result.payment,
+      settlementMode: result.settlementMode || 'SANDBOX_WALLET_SIMULATION',
+      upstreamPayPalStatus: result.upstreamPayPalStatus || 'APPROVAL_PENDING',
       buyerWallet:
         result.buyerWallet || paypalSandboxEngine.getBuyerSandboxWallet(targetUserId, targetEmail),
       balanceBefore: result.balanceBefore,
@@ -5053,16 +5056,12 @@ async function startServer() {
     });
   });
 
-  // 4B. Upgrade or Downgrade Subscription Plan
+  // 4B. Upgrade or Downgrade Subscription Plan (Strictly Authenticated)
   app.post('/api/subscriptions/change-plan', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    const targetUserId =
-      auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
-    const targetEmail =
-      auth?.user?.email ||
-      (req.body?.userEmail as string) ||
-      usersById.get(targetUserId)?.email ||
-      'member@spark.app';
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
+    const targetEmail = auth.user.email;
     const { newPlanId } = req.body || {};
     if (!newPlanId || !['free', 'luna', 'terra', 'sol'].includes(newPlanId)) {
       res.status(400).json({
@@ -5084,7 +5083,7 @@ async function startServer() {
     const balanceRes = paypalSandboxEngine.getAccountBalanceForUser({
       authenticatedUserId: targetUserId,
       userEmail: targetEmail,
-      preferredCurrency: auth?.user?.preferences?.defaultCurrency || 'USD',
+      preferredCurrency: auth.user.preferences?.defaultCurrency || 'USD',
       autoInitializeSandboxWallet: true,
     });
 
@@ -5109,11 +5108,11 @@ async function startServer() {
     });
   });
 
-  // 5. Cancel Subscription (Active Until Period End)
+  // 5. Cancel Subscription (Active Until Period End — Strictly Authenticated)
   app.post('/api/subscriptions/cancel', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    const targetUserId =
-      auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
 
     const subscription = cancelSubscription(targetUserId);
     saveRuntimeSnapshot();
@@ -5152,15 +5151,11 @@ async function startServer() {
     });
   });
 
-  // 7. AG Grid Intelligent Analytics Aggregation Endpoint
+  // 7. AG Grid Intelligent Analytics Aggregation Endpoint (Strictly Authenticated)
   app.get('/api/subscriptions/analytics', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    const targetUserId =
-      auth?.user?.id ||
-      (req.header('x-spark-user-id') as string) ||
-      (req.query.userId as string) ||
-      latestActiveUserId ||
-      'anonymous_user';
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
 
     const quotaStatus = getUserQuotaStatus(targetUserId);
     const payments = getSubscriptionPayments(targetUserId);
@@ -5178,14 +5173,14 @@ async function startServer() {
     });
   });
 
-  // 8. Persistent AG Grid Dashboard Preferences
+  // 8. Persistent AG Grid Dashboard Preferences (Strictly Authenticated)
   app.put('/api/subscriptions/dashboard-preferences', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    const targetUserId =
-      auth?.user?.id || (req.body?.userId as string) || latestActiveUserId || 'anonymous_user';
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
     const { defaultTab, pageSize, quickFilterDefault } = req.body || {};
     const saved = saveUserDashboardPreferences(targetUserId, {
-      defaultTab: String(defaultTab || 'saved_products'),
+      defaultTab: String(defaultTab || 'saved_products') as any,
       pageSize: Number(pageSize || 10),
       quickFilterDefault: String(quickFilterDefault || ''),
     });
@@ -5193,15 +5188,11 @@ async function startServer() {
     res.json({ ok: true, dashboardPreferences: saved });
   });
 
-  // 9. User Data Export & User-Requested Data Deletion (Section 5 Database Requirements)
+  // 9. User Data Export & User-Requested Data Deletion (Strictly Authenticated)
   app.get('/api/user/data-export', (req, res) => {
-    const auth = authenticateRequest(req, res, { optional: true });
-    const targetUserId =
-      auth?.user?.id ||
-      (req.header('x-spark-user-id') as string) ||
-      (req.query.userId as string) ||
-      latestActiveUserId ||
-      'anonymous_user';
+    const auth = authenticateRequest(req, res);
+    if (!auth) return;
+    const targetUserId = auth.user.id;
 
     const profile = usersById.get(targetUserId) || null;
     const conversations = conversationsByUserId.get(targetUserId) || [];
@@ -6292,6 +6283,7 @@ async function startServer() {
 
     const concurrencyCheck = acquireConcurrency(targetUserId);
     if (!concurrencyCheck.allowed) {
+      releaseFeatureQuotaReservation(targetUserId, 'workflow', quotaCheck.reservationId);
       res.status(429).json({
         ok: false,
         errorCode: 'concurrency_limit_exceeded',
@@ -6350,6 +6342,7 @@ async function startServer() {
         voiceInteraction: voicePayload,
       };
       releaseConcurrency(targetUserId);
+      releaseFeatureQuotaReservation(targetUserId, 'workflow', quotaCheck.reservationId);
       res.json(earlyPayload);
       return;
     }
@@ -6426,6 +6419,7 @@ async function startServer() {
         voiceInteraction: voicePayload,
       };
       releaseConcurrency(targetUserId);
+      releaseFeatureQuotaReservation(targetUserId, 'workflow', quotaCheck.reservationId);
       res.json(contraPayload);
       return;
     }
@@ -6493,6 +6487,7 @@ async function startServer() {
         voiceInteraction: voicePayload,
       };
       releaseConcurrency(targetUserId);
+      releaseFeatureQuotaReservation(targetUserId, 'workflow', quotaCheck.reservationId);
       saveRuntimeSnapshot();
       res.json(cartOnlyPayload);
       return;
@@ -6572,6 +6567,7 @@ async function startServer() {
         scienceAnalysis: null,
       };
       releaseConcurrency(targetUserId);
+      releaseFeatureQuotaReservation(targetUserId, 'workflow', quotaCheck.reservationId);
       res.json(clarificationPayload);
       return;
     }
@@ -6818,7 +6814,7 @@ async function startServer() {
     };
 
     releaseConcurrency(targetUserId);
-    recordFeatureUsage(targetUserId, 'workflow', 0, 0);
+    recordFeatureUsage(targetUserId, 'workflow', 0, 0, quotaCheck.reservationId);
     recordFeatureUsage(targetUserId, 'search');
     if (intent.couponRequested) {
       recordFeatureUsage(targetUserId, 'coupon');

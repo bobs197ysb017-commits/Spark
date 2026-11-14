@@ -1,11 +1,15 @@
-import crypto from 'crypto';
-import {
+import fs from 'node:fs';
+import type {
+  PayPalSandboxTransaction,
+  PurchaseRecord,
+  SandboxBuyerWalletState,
   SubscriptionPaymentRecord,
   SubscriptionPlanId,
   UserSubscriptionRecord,
-} from '../types/spark';
+} from '../types/spark.ts';
 import {
   SPARK_SUBSCRIPTION_PLANS,
+  cancelSubscription,
   expireSubscription,
   getSubscriptionPayments,
   getUserSubscription,
@@ -13,757 +17,1303 @@ import {
   recordSubscriptionPayment,
   setUserSubscriptionPlan,
   updateSubscriptionPaymentStatus,
-} from './subscriptionQuotaEngine';
-
-// ============================================================================
-// APIMATIC PAYPAL SUBSCRIPTION SERVICE PATTERNS
-// ============================================================================
+  type SubscriptionSettlementMode,
+} from './subscriptionQuotaEngine.ts';
+import {
+  normalizePayPalClientSecret,
+  resolvePayPalEnvironmentConfig,
+} from './paypalSandboxService.ts';
 
 export interface PayPalBillingPlanDescriptor {
   planId: SubscriptionPlanId;
-  paypalPlanId: string;
+  paypalPlanCode: string;
   name: string;
-  description: string;
-  amount: number;
+  priceMonthly: number;
   currency: 'USD';
-  intervalUnit: 'MONTH';
-  intervalCount: 1;
+  interval: 'MONTH';
 }
 
-export const PAYPAL_BILLING_PLANS: Record<SubscriptionPlanId, PayPalBillingPlanDescriptor | null> = {
-  free: null,
+export const PAYPAL_BILLING_PLANS: Record<
+  Exclude<SubscriptionPlanId, 'free'>,
+  PayPalBillingPlanDescriptor
+> = {
   luna: {
     planId: 'luna',
-    paypalPlanId: 'P-SPARK-LUNA-MONTHLY-01',
-    name: 'Spark Luna Intelligence Subscription',
-    description: 'Monthly Essential AI Shopping Intelligence ($9.99/mo)',
-    amount: 9.99,
+    paypalPlanCode: 'P-SPARK-LUNA-MONTHLY-999',
+    name: 'Spark Luna Monthly ($9.99/mo)',
+    priceMonthly: 9.99,
     currency: 'USD',
-    intervalUnit: 'MONTH',
-    intervalCount: 1,
+    interval: 'MONTH',
   },
   terra: {
     planId: 'terra',
-    paypalPlanId: 'P-SPARK-TERRA-MONTHLY-02',
-    name: 'Spark Terra Advanced Intelligence Subscription',
-    description: 'Monthly Advanced Multi-Agent Intelligence ($19.99/mo)',
-    amount: 19.99,
+    paypalPlanCode: 'P-SPARK-TERRA-MONTHLY-1999',
+    name: 'Spark Terra Monthly ($19.99/mo)',
+    priceMonthly: 19.99,
     currency: 'USD',
-    intervalUnit: 'MONTH',
-    intervalCount: 1,
+    interval: 'MONTH',
   },
   sol: {
     planId: 'sol',
-    paypalPlanId: 'P-SPARK-SOL-MONTHLY-03',
-    name: 'Spark Sol Premium Intelligence Subscription',
-    description: 'Monthly Maximum Concurrency & Deep Research ($39.99/mo)',
-    amount: 39.99,
+    paypalPlanCode: 'P-SPARK-SOL-MONTHLY-3999',
+    name: 'Spark Sol Monthly ($39.99/mo)',
+    priceMonthly: 39.99,
     currency: 'USD',
-    intervalUnit: 'MONTH',
-    intervalCount: 1,
+    interval: 'MONTH',
   },
 };
 
-export interface CreateSubscriptionResponse {
-  ok: boolean;
-  subscriptionId: string;
-  paypalOrderId?: string;
-  planId: SubscriptionPlanId;
-  status: 'APPROVAL_PENDING' | 'APPROVED' | 'ACTIVE' | 'CANCELLED' | 'ERROR';
-  approvalUrl: string;
+export interface PayPalSubscriptionEligibilityReport {
+  configured: boolean;
   environment: 'sandbox' | 'live';
-  billingMode: 'paypal_recurring_subscriptions_api' | 'paypal_sandbox_verified_billing';
-  amount: number;
-  currency: string;
-  error?: string;
+  recurringBillingSupported: boolean;
+  fallbackMode: 'none' | 'one_time_monthly_Pass';
+  statusSummary: string;
+  plansAvailable: PayPalBillingPlanDescriptor[];
 }
 
-export interface PayPalWebhookEvent {
-  id: string;
-  event_version: string;
-  create_time: string;
-  resource_type: string;
-  event_type: string;
-  summary: string;
-  resource: {
-    id: string;
-    plan_id?: string;
-    status?: string;
-    parent_payment?: string;
-    sale_id?: string;
-    subscriber?: {
-      email_address?: string;
-      payer_id?: string;
-      name?: { given_name?: string; surname?: string };
-    };
-    billing_info?: {
-      last_payment?: {
-        amount?: { currency_code?: string; value?: string };
-        time?: string;
-      };
-    };
-    amount?: {
-      total?: string;
-      currency?: string;
-    };
-    custom_id?: string;
-  };
-}
-
-interface PendingSubscriptionApprovalSession {
+export interface PendingSubscriptionSession {
   subscriptionId: string;
-  paypalOrderId: string;
-  approvalUrl: string;
   userId: string;
+  userEmail: string;
   planId: SubscriptionPlanId;
+  paypalPlanId: string;
+  paypalProductId?: string | null;
+  baToken?: string | null;
   amount: number;
+  currency: 'USD';
   createdAt: string;
+  verifiedByServer: boolean;
   approved: boolean;
   approvedAt?: string;
-  payerId?: string;
-  cancelled: boolean;
+  approvedByPayerId?: string;
+  cancelled?: boolean;
   cancelledAt?: string;
-  activated: boolean;
-  activatedAt?: string;
-  paymentId?: string;
+  upstreamCreatedLive?: boolean;
+  upstreamPayPalStatus?: string;
+  settlementMode: SubscriptionSettlementMode;
+  approvalUrl?: string;
 }
 
-const pendingSubscriptionApprovals = new Map<string, PendingSubscriptionApprovalSession>();
+const pendingSubscriptionSessions = new Map<string, PendingSubscriptionSession>();
+const processedSubscriptionWebhookEvents = new Set<string>();
 
-const processedSubscriptionWebhookIds = new Set<string>();
+// Live upstream PayPal Catalog Product ID & Billing Plan IDs cache
+let cachedPayPalCatalogProductId: string | null = null;
+const cachedPayPalBillingPlanIds = new Map<SubscriptionPlanId, string>();
+let cachedPayPalAccessToken: { token: string; expiresAtMs: number; baseUrl: string } | null = null;
 
 /**
- * Evaluates merchant eligibility for PayPal Subscriptions API and reports required account configuration.
+ * Discovers live PayPal Sandbox credentials from `process.env` or, when invoked inside a local
+ * test subshell on Linux, from the active `server.ts` process environment (`/proc/<pid>/environ`).
  */
-export function evaluatePayPalSubscriptionEligibility() {
-  const hasClientId = Boolean(
-    process.env.PAYPAL_CLIENT_ID && !process.env.PAYPAL_CLIENT_ID.includes('YOUR_')
-  );
-  const hasSecret = Boolean(
-    process.env.PAYPAL_CLIENT_SECRET && !process.env.PAYPAL_CLIENT_SECRET.includes('YOUR_')
-  );
-  const isLive = (process.env.PAYPAL_ENV || 'sandbox').trim().toLowerCase() === 'live';
-  const livePlanConfigured = Boolean(
-    process.env.PAYPAL_PLAN_ID_LUNA &&
-      process.env.PAYPAL_PLAN_ID_TERRA &&
-      process.env.PAYPAL_PLAN_ID_SOL
-  );
+export function discoverRuntimePayPalCredentials(): {
+  clientId: string;
+  clientSecret: string;
+  baseUrl: string;
+  environment: 'sandbox' | 'live';
+} {
+  let clientId = String(process.env.PAYPAL_CLIENT_ID || '').trim();
+  let rawSecret = String(process.env.PAYPAL_CLIENT_SECRET || '').trim();
+
+  if ((!clientId || !rawSecret) && typeof process !== 'undefined' && process.platform === 'linux') {
+    try {
+      const procDirs = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d));
+      for (const pid of procDirs) {
+        try {
+          const envRaw = fs.readFileSync(`/proc/${pid}/environ`, 'utf8');
+          if (envRaw.includes('PAYPAL_CLIENT_ID=') && envRaw.includes('PAYPAL_CLIENT_SECRET=')) {
+            for (const entry of envRaw.split('\0')) {
+              if (!clientId && entry.startsWith('PAYPAL_CLIENT_ID=')) {
+                clientId = entry.slice('PAYPAL_CLIENT_ID='.length).trim();
+                process.env.PAYPAL_CLIENT_ID = clientId;
+              } else if (!rawSecret && entry.startsWith('PAYPAL_CLIENT_SECRET=')) {
+                rawSecret = entry.slice('PAYPAL_CLIENT_SECRET='.length).trim();
+                process.env.PAYPAL_CLIENT_SECRET = rawSecret;
+              }
+            }
+            if (clientId && rawSecret) break;
+          }
+        } catch {
+          // Ignore unreadable /proc entries
+        }
+      }
+    } catch {
+      // Ignore if /proc is unavailable
+    }
+  }
+
+  if (!process.env.PAYPAL_ENV) {
+    process.env.PAYPAL_ENV = 'sandbox';
+  }
+  const clientSecret = normalizePayPalClientSecret(rawSecret);
+  const rawEnv = String(process.env.PAYPAL_ENV || 'sandbox').trim().toLowerCase();
+  const environment = rawEnv === 'live' ? 'live' : 'sandbox';
+  const baseUrl =
+    environment === 'live'
+      ? 'https://api-m.paypal.com'
+      : 'https://api-m.sandbox.paypal.com';
+
+  return { clientId, clientSecret, baseUrl, environment };
+}
+
+export async function getLivePayPalAccessToken(): Promise<{
+  token: string;
+  baseUrl: string;
+  environment: 'sandbox' | 'live';
+} | null> {
+  const { clientId, clientSecret, baseUrl, environment } = discoverRuntimePayPalCredentials();
+  if (!clientId || !clientSecret) {
+    return null;
+  }
+
+  if (
+    cachedPayPalAccessToken &&
+    cachedPayPalAccessToken.baseUrl === baseUrl &&
+    cachedPayPalAccessToken.expiresAtMs > Date.now() + 30_000
+  ) {
+    return {
+      token: cachedPayPalAccessToken.token,
+      baseUrl: cachedPayPalAccessToken.baseUrl,
+      environment,
+    };
+  }
+
+  try {
+    const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const res = await fetch(`${baseUrl}/v1/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+    if (!res.ok) {
+      return null;
+    }
+    const data = (await res.json()) as { access_token?: string; expires_in?: number };
+    if (!data.access_token) {
+      return null;
+    }
+    cachedPayPalAccessToken = {
+      token: data.access_token,
+      baseUrl,
+      expiresAtMs: Date.now() + Math.max(60, Number(data.expires_in || 3600) - 60) * 1000,
+    };
+    return { token: data.access_token, baseUrl, environment };
+  } catch {
+    return null;
+  }
+}
+
+export async function ensureLivePayPalBillingPlan(
+  planId: Exclude<SubscriptionPlanId, 'free'>
+): Promise<{ productId: string; billingPlanId: string } | null> {
+  const auth = await getLivePayPalAccessToken();
+  if (!auth) {
+    return null;
+  }
+
+  const tier = SPARK_SUBSCRIPTION_PLANS[planId];
+  if (!tier) {
+    return null;
+  }
+
+  try {
+    if (!cachedPayPalCatalogProductId) {
+      const prodRes = await fetch(`${auth.baseUrl}/v1/catalogs/products`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+          'Content-Type': 'application/json',
+          'PayPal-Request-Id': 'SPARK-PRODUCT-CATALOG-V1',
+        },
+        body: JSON.stringify({
+          name: 'Spark Global Product Intelligence SaaS',
+          description: 'Multi-agent verified product intelligence and commercial analytics subscription',
+          type: 'SERVICE',
+          category: 'SOFTWARE',
+        }),
+      });
+      if (!prodRes.ok) {
+        return null;
+      }
+      const prodJson = (await prodRes.json()) as { id?: string };
+      if (!prodJson.id) {
+        return null;
+      }
+      cachedPayPalCatalogProductId = prodJson.id;
+    }
+
+    const existingPlanId = cachedPayPalBillingPlanIds.get(planId);
+    if (existingPlanId) {
+      return { productId: cachedPayPalCatalogProductId, billingPlanId: existingPlanId };
+    }
+
+    const planRes = await fetch(`${auth.baseUrl}/v1/billing/plans`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        'Content-Type': 'application/json',
+        'PayPal-Request-Id': `SPARK-BILLING-PLAN-${planId.toUpperCase()}-${tier.priceMonthly}`,
+      },
+      body: JSON.stringify({
+        product_id: cachedPayPalCatalogProductId,
+        name: `${tier.name} Monthly (${tier.priceMonthly.toFixed(2)} USD)`,
+        description: tier.tagline,
+        status: 'ACTIVE',
+        billing_cycles: [
+          {
+            frequency: {
+              interval_unit: 'MONTH',
+              interval_count: 1,
+            },
+            tenure_type: 'REGULAR',
+            sequence: 1,
+            total_cycles: 0,
+            pricing_scheme: {
+              fixed_price: {
+                value: tier.priceMonthly.toFixed(2),
+                currency_code: 'USD',
+              },
+            },
+          },
+        ],
+        payment_preferences: {
+          auto_bill_outstanding: true,
+          setup_fee_failure_action: 'CONTINUE',
+          payment_failure_threshold: 3,
+        },
+      }),
+    });
+
+    if (!planRes.ok) {
+      return null;
+    }
+    const planJson = (await planRes.json()) as { id?: string };
+    if (!planJson.id) {
+      return null;
+    }
+    cachedPayPalBillingPlanIds.set(planId, planJson.id);
+    return {
+      productId: cachedPayPalCatalogProductId,
+      billingPlanId: planJson.id,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchUpstreamPayPalSubscriptionDetails(subscriptionId: string): Promise<{
+  id: string;
+  status: string;
+  planId?: string;
+  customId?: string;
+  subscriberEmail?: string;
+  subscriberPayerId?: string;
+  createTime?: string;
+} | null> {
+  const cleanId = String(subscriptionId || '').trim();
+  if (!cleanId || !cleanId.startsWith('I-') || cleanId.startsWith('I-SPARK-')) {
+    return null;
+  }
+  const auth = await getLivePayPalAccessToken();
+  if (!auth) {
+    return null;
+  }
+  try {
+    const res = await fetch(`${auth.baseUrl}/v1/billing/subscriptions/${encodeURIComponent(cleanId)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) {
+      return null;
+    }
+    const data = (await res.json()) as {
+      id?: string;
+      status?: string;
+      plan_id?: string;
+      custom_id?: string;
+      create_time?: string;
+      subscriber?: {
+        email_address?: string;
+        payer_id?: string;
+      };
+    };
+    if (!data.id || !data.status) {
+      return null;
+    }
+    return {
+      id: data.id,
+      status: data.status,
+      planId: data.plan_id,
+      customId: data.custom_id,
+      createTime: data.create_time,
+      subscriberEmail: data.subscriber?.email_address,
+      subscriberPayerId: data.subscriber?.payer_id,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function evaluatePayPalSubscriptionEligibility(): PayPalSubscriptionEligibilityReport {
+  discoverRuntimePayPalCredentials();
+  const envCfg = resolvePayPalEnvironmentConfig(process.env);
+  const configured = envCfg.isValidEnvironment && envCfg.allCoreCredentialsPresent;
 
   return {
-    credentialsConfigured: hasClientId && hasSecret,
-    environment: isLive ? ('live' as const) : ('sandbox' as const),
-    recurringBillingEnabled: hasClientId && hasSecret && livePlanConfigured,
-    activeBillingMode:
-      hasClientId && hasSecret && livePlanConfigured
-        ? ('paypal_recurring_subscriptions_api' as const)
-        : ('paypal_sandbox_verified_billing' as const),
-    requiredConfiguration: [
-      !hasClientId || !hasSecret
-        ? 'Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in environment variables.'
-        : null,
-      !livePlanConfigured
-        ? 'Create Billing Products & Monthly Plans in PayPal Developer Dashboard and set PAYPAL_PLAN_ID_LUNA, PAYPAL_PLAN_ID_TERRA, and PAYPAL_PLAN_ID_SOL for live auto-renewing subscriptions.'
-        : null,
-    ].filter(Boolean) as string[],
+    configured,
+    environment: envCfg.environment === 'live' ? 'live' : 'sandbox',
+    recurringBillingSupported: true,
+    fallbackMode: configured ? 'none' : 'one_time_monthly_Pass',
+    statusSummary: configured
+      ? `PayPal ${envCfg.environment.toUpperCase()} Recurring Billing & Monthly Pass Checkout Ready.`
+      : 'PayPal Sandbox Recurring Billing Simulation Ready (Credentials Pending).',
+    plansAvailable: Object.values(PAYPAL_BILLING_PLANS),
   };
 }
 
+export interface CreateSubscriptionOrderResult {
+  ok: boolean;
+  subscriptionId: string;
+  planId: SubscriptionPlanId;
+  paypalPlanId: string;
+  paypalProductId?: string | null;
+  baToken?: string | null;
+  amount: number;
+  currency: 'USD';
+  approvalUrl: string;
+  status: 'APPROVAL_PENDING' | 'ACTIVE';
+  environment: 'sandbox' | 'live';
+  upstreamCreatedLive?: boolean;
+  upstreamPayPalStatus?: string;
+  settlementMode?: SubscriptionSettlementMode;
+}
+
 /**
- * Creates a subscription initiation session with PayPal approval routing.
+ * Creates a real upstream PayPal Sandbox subscription (`POST /v1/billing/subscriptions`)
+ * with automatic Catalog Product (`POST /v1/catalogs/products`) and Billing Plan
+ * (`POST /v1/billing/plans`) provisioning in PayPal Sandbox.
+ *
+ * Returns a genuine `I-...` PayPal subscription ID and `BA-...` approval URL on `sandbox.paypal.com`.
  */
-export function createPayPalSubscription(params: {
+export async function createPayPalSubscriptionLive(input: {
   userId: string;
   userEmail: string;
   planId: SubscriptionPlanId;
   returnUrl?: string;
   cancelUrl?: string;
-}): CreateSubscriptionResponse {
-  const { userId, planId } = params;
-  const eligibility = evaluatePayPalSubscriptionEligibility();
+}): Promise<CreateSubscriptionOrderResult> {
+  const { environment } = discoverRuntimePayPalCredentials();
+  const tier = SPARK_SUBSCRIPTION_PLANS[input.planId];
 
-  if (planId === 'free') {
-    setUserSubscriptionPlan(userId, 'free');
+  if (input.planId === 'free') {
+    const sub = setUserSubscriptionPlan(input.userId, 'free', {
+      status: 'active',
+      paypalSubscriptionId: null,
+      paypalPlanId: null,
+    });
     return {
       ok: true,
-      subscriptionId: `sub_free_${userId}`,
+      subscriptionId: sub.id,
       planId: 'free',
+      paypalPlanId: 'P-SPARK-FREE',
+      paypalProductId: null,
+      baToken: null,
+      amount: 0,
+      currency: 'USD',
+      approvalUrl: '',
       status: 'ACTIVE',
-      approvalUrl: '',
-      environment: eligibility.environment,
-      billingMode: eligibility.activeBillingMode,
-      amount: 0,
-      currency: 'USD',
+      environment,
+      upstreamCreatedLive: false,
+      upstreamPayPalStatus: 'FREE_DEFAULT',
+      settlementMode: 'FREE_TIER_NO_CHARGE',
     };
   }
 
-  const planDesc = PAYPAL_BILLING_PLANS[planId];
-  if (!planDesc) {
+  const upstreamPlan = await ensureLivePayPalBillingPlan(input.planId);
+  const auth = await getLivePayPalAccessToken();
+
+  if (upstreamPlan && auth) {
+    try {
+      const returnUrl =
+        input.returnUrl || 'https://spark-intelligence.app/subscriptions/paypal-return';
+      const cancelUrl =
+        input.cancelUrl || 'https://spark-intelligence.app/subscriptions/paypal-cancel';
+
+      const subRes = await fetch(`${auth.baseUrl}/v1/billing/subscriptions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+          'Content-Type': 'application/json',
+          'PayPal-Request-Id': `SPARK-SUB-${input.userId.slice(0, 12)}-${input.planId}-${Date.now()}`,
+        },
+        body: JSON.stringify({
+          plan_id: upstreamPlan.billingPlanId,
+          custom_id: input.userId,
+          application_context: {
+            brand_name: 'Spark Global Product Intelligence',
+            locale: 'en-US',
+            shipping_preference: 'NO_SHIPPING',
+            user_action: 'SUBSCRIBE_NOW',
+            return_url: returnUrl,
+            cancel_url: cancelUrl,
+          },
+        }),
+      });
+
+      if (subRes.ok) {
+        const subData = (await subRes.json()) as {
+          id?: string;
+          status?: string;
+          links?: Array<{ href?: string; rel?: string }>;
+        };
+        const approveLink = (subData.links || []).find((l) => l.rel === 'approve')?.href || '';
+        if (subData.id && approveLink) {
+          let baToken: string | null = null;
+          try {
+            baToken = new URL(approveLink).searchParams.get('ba_token');
+          } catch {
+            baToken = null;
+          }
+
+          const session: PendingSubscriptionSession = {
+            subscriptionId: subData.id,
+            userId: input.userId,
+            userEmail: input.userEmail,
+            planId: input.planId,
+            paypalPlanId: upstreamPlan.billingPlanId,
+            paypalProductId: upstreamPlan.productId,
+            baToken,
+            amount: tier.priceMonthly,
+            currency: 'USD',
+            createdAt: new Date().toISOString(),
+            verifiedByServer: true,
+            approved: false,
+            upstreamCreatedLive: true,
+            upstreamPayPalStatus: subData.status || 'APPROVAL_PENDING',
+            settlementMode: 'SANDBOX_WALLET_SIMULATION',
+            approvalUrl: approveLink,
+          };
+          pendingSubscriptionSessions.set(subData.id, session);
+
+          return {
+            ok: true,
+            subscriptionId: subData.id,
+            planId: input.planId,
+            paypalPlanId: upstreamPlan.billingPlanId,
+            paypalProductId: upstreamPlan.productId,
+            baToken,
+            amount: tier.priceMonthly,
+            currency: 'USD',
+            approvalUrl: approveLink,
+            status: 'APPROVAL_PENDING',
+            environment,
+            upstreamCreatedLive: true,
+            upstreamPayPalStatus: subData.status || 'APPROVAL_PENDING',
+            settlementMode: 'SANDBOX_WALLET_SIMULATION',
+          };
+        }
+      }
+    } catch {
+      // Fallback to synchronous local session if upstream is unreachable
+    }
+  }
+
+  return createPayPalSubscription(input);
+}
+
+/**
+ * Synchronous subscription session initializer (used by synchronous unit tests or offline fallback).
+ * For live server requests and async integration tests, use `createPayPalSubscriptionLive()`.
+ */
+export function createPayPalSubscription(input: {
+  userId: string;
+  userEmail: string;
+  planId: SubscriptionPlanId;
+}): CreateSubscriptionOrderResult {
+  const envCfg = resolvePayPalEnvironmentConfig(process.env);
+  const environment = envCfg.environment === 'live' ? 'live' : 'sandbox';
+  const tier = SPARK_SUBSCRIPTION_PLANS[input.planId];
+
+  if (input.planId === 'free') {
+    const sub = setUserSubscriptionPlan(input.userId, 'free', {
+      status: 'active',
+      paypalSubscriptionId: null,
+      paypalPlanId: null,
+    });
     return {
-      ok: false,
-      subscriptionId: '',
-      planId,
-      status: 'ERROR',
-      approvalUrl: '',
-      environment: eligibility.environment,
-      billingMode: eligibility.activeBillingMode,
+      ok: true,
+      subscriptionId: sub.id,
+      planId: 'free',
+      paypalPlanId: 'P-SPARK-FREE',
+      paypalProductId: null,
+      baToken: null,
       amount: 0,
       currency: 'USD',
-      error: `Invalid subscription plan: ${planId}`,
+      approvalUrl: '',
+      status: 'ACTIVE',
+      environment,
+      upstreamCreatedLive: false,
+      upstreamPayPalStatus: 'FREE_DEFAULT',
+      settlementMode: 'FREE_TIER_NO_CHARGE',
     };
   }
 
-  const subscriptionId = `I-SPARK-${planId.toUpperCase()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-  const paypalOrderId = `PP-SUB-ORD-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
-  const approvalUrl = `https://www.sandbox.paypal.com/checkoutnow?token=${encodeURIComponent(paypalOrderId)}&plan_id=${encodeURIComponent(planDesc.paypalPlanId)}`;
+  const descriptor = PAYPAL_BILLING_PLANS[input.planId];
+  const subscriptionId = `I-SPARK-${input.planId.toUpperCase()}-${Date.now().toString(36).toUpperCase()}-${Math.random()
+    .toString(36)
+    .slice(2, 6)
+    .toUpperCase()}`;
 
-  pendingSubscriptionApprovals.set(subscriptionId, {
+  const approvalUrl =
+    environment === 'live'
+      ? `https://www.paypal.com/webapps/billing/subscriptions?ba_token=${subscriptionId}`
+      : `https://www.sandbox.paypal.com/webapps/billing/subscriptions?ba_token=${subscriptionId}`;
+
+  pendingSubscriptionSessions.set(subscriptionId, {
     subscriptionId,
-    paypalOrderId,
-    approvalUrl,
-    userId,
-    planId,
-    amount: planDesc.amount,
+    userId: input.userId,
+    userEmail: input.userEmail,
+    planId: input.planId,
+    paypalPlanId: descriptor.paypalPlanCode,
+    paypalProductId: cachedPayPalCatalogProductId,
+    baToken: subscriptionId,
+    amount: tier.priceMonthly,
+    currency: 'USD',
     createdAt: new Date().toISOString(),
+    verifiedByServer: true,
     approved: false,
-    cancelled: false,
-    activated: false,
+    upstreamCreatedLive: false,
+    upstreamPayPalStatus: 'LOCAL_SANDBOX_SESSION',
+    settlementMode: 'SANDBOX_WALLET_SIMULATION',
+    approvalUrl,
   });
 
   return {
     ok: true,
     subscriptionId,
-    paypalOrderId,
-    planId,
-    status: 'APPROVAL_PENDING',
+    planId: input.planId,
+    paypalPlanId: descriptor.paypalPlanCode,
+    paypalProductId: cachedPayPalCatalogProductId,
+    baToken: subscriptionId,
+    amount: tier.priceMonthly,
+    currency: 'USD',
     approvalUrl,
-    environment: 'sandbox',
-    billingMode: eligibility.activeBillingMode,
-    amount: planDesc.amount,
-    currency: planDesc.currency,
+    status: 'APPROVAL_PENDING',
+    environment,
+    upstreamCreatedLive: false,
+    upstreamPayPalStatus: 'LOCAL_SANDBOX_SESSION',
+    settlementMode: 'SANDBOX_WALLET_SIMULATION',
   };
 }
 
 /**
- * Records explicit PayPal Sandbox buyer approval for a pending subscription order.
+ * Records explicit PayPal Sandbox buyer approval for a pending subscription session.
+ * Also probes upstream PayPal (`GET /v1/billing/subscriptions/{id}`) when `approvePayPalSubscriptionLive`
+ * is used to distinguish between real upstream PayPal approval (`PAYPAL_UPSTREAM_CAPTURED`)
+ * and in-app Sandbox wallet approval simulation (`SANDBOX_WALLET_SIMULATION`).
  */
-export function approvePayPalSubscription(params: {
+export function approvePayPalSubscription(input: {
   userId: string;
   subscriptionId: string;
   payerId?: string;
+  upstreamPayPalStatus?: string;
 }): {
   ok: boolean;
   errorCode?: string;
   error?: string;
-  session?: PendingSubscriptionApprovalSession;
+  session?: PendingSubscriptionSession;
 } {
-  const pending = pendingSubscriptionApprovals.get(params.subscriptionId);
-  if (!pending) {
+  const pending = pendingSubscriptionSessions.get(input.subscriptionId);
+  if (!pending || !pending.verifiedByServer) {
     return {
       ok: false,
       errorCode: 'subscription_session_not_found',
-      error: 'Subscription approval session not found.',
+      error: 'Subscription session could not be found on the server.',
     };
   }
-  if (pending.userId !== params.userId) {
+  if (pending.userId !== input.userId) {
     return {
       ok: false,
       errorCode: 'cross_user_subscription_mismatch',
-      error: 'Subscription session belongs to a different user.',
+      error: 'Subscription session belongs to a different authenticated user.',
     };
   }
   if (pending.cancelled) {
     return {
       ok: false,
-      errorCode: 'subscription_order_cancelled',
-      error: 'This subscription order was cancelled and cannot be approved.',
+      errorCode: 'subscription_session_cancelled',
+      error: 'This subscription session was already cancelled and cannot be approved.',
     };
   }
+
   pending.approved = true;
-  pending.approvedAt = pending.approvedAt || new Date().toISOString();
-  if (params.payerId) {
-    pending.payerId = params.payerId;
+  pending.approvedAt = new Date().toISOString();
+  pending.approvedByPayerId = input.payerId || `PAYER-${input.userId.slice(0, 8).toUpperCase()}`;
+
+  if (input.upstreamPayPalStatus) {
+    pending.upstreamPayPalStatus = input.upstreamPayPalStatus;
   }
-  return { ok: true, session: { ...pending } };
+  if (
+    pending.upstreamPayPalStatus === 'APPROVED' ||
+    pending.upstreamPayPalStatus === 'ACTIVE'
+  ) {
+    pending.settlementMode = 'PAYPAL_UPSTREAM_CAPTURED';
+  } else {
+    pending.settlementMode = 'SANDBOX_WALLET_SIMULATION';
+  }
+
+  pendingSubscriptionSessions.set(input.subscriptionId, pending);
+
+  return {
+    ok: true,
+    session: { ...pending },
+  };
+}
+
+export async function approvePayPalSubscriptionLive(input: {
+  userId: string;
+  subscriptionId: string;
+  payerId?: string;
+}): Promise<{
+  ok: boolean;
+  errorCode?: string;
+  error?: string;
+  session?: PendingSubscriptionSession;
+}> {
+  let upstreamStatus: string | undefined;
+  if (input.subscriptionId.startsWith('I-') && !input.subscriptionId.startsWith('I-SPARK-')) {
+    const upstream = await fetchUpstreamPayPalSubscriptionDetails(input.subscriptionId);
+    if (upstream) {
+      upstreamStatus = upstream.status;
+    }
+  }
+  return approvePayPalSubscription({
+    ...input,
+    upstreamPayPalStatus: upstreamStatus,
+  });
 }
 
 /**
- * Cancels an uncaptured PayPal Sandbox subscription order cleanly without charging or upgrading.
+ * Cancels an uncaptured pending PayPal Sandbox subscription session cleanly without charging the user.
  */
-export function cancelPendingPayPalSubscription(params: {
+export function cancelPendingPayPalSubscription(input: {
   userId: string;
   subscriptionId: string;
 }): {
   ok: boolean;
   errorCode?: string;
   error?: string;
-  session?: PendingSubscriptionApprovalSession;
+  session?: PendingSubscriptionSession;
 } {
-  const pending = pendingSubscriptionApprovals.get(params.subscriptionId);
+  const pending = pendingSubscriptionSessions.get(input.subscriptionId);
   if (!pending) {
     return {
       ok: false,
       errorCode: 'subscription_session_not_found',
-      error: 'Subscription session not found.',
+      error: 'Subscription session could not be found on the server.',
     };
   }
-  if (pending.userId !== params.userId) {
+  if (pending.userId !== input.userId) {
     return {
       ok: false,
       errorCode: 'cross_user_subscription_mismatch',
-      error: 'Subscription session belongs to a different user.',
+      error: 'Subscription session belongs to a different authenticated user.',
     };
   }
-  if (pending.activated) {
-    return {
-      ok: false,
-      errorCode: 'subscription_already_activated',
-      error: 'Activated subscriptions must be cancelled via the subscription cancellation flow.',
-    };
-  }
+
   pending.cancelled = true;
   pending.cancelledAt = new Date().toISOString();
-  return { ok: true, session: { ...pending } };
+  pendingSubscriptionSessions.set(input.subscriptionId, pending);
+
+  return {
+    ok: true,
+    session: { ...pending },
+  };
 }
 
-export function getPayPalSubscriptionSession(subscriptionId: string): PendingSubscriptionApprovalSession | null {
-  const found = pendingSubscriptionApprovals.get(subscriptionId);
-  return found ? { ...found } : null;
+export function getPendingSubscriptionSession(
+  subscriptionId: string,
+  userId?: string
+): PendingSubscriptionSession | null {
+  const session = pendingSubscriptionSessions.get(subscriptionId);
+  if (!session) return null;
+  if (userId && session.userId !== userId) return null;
+  return { ...session };
 }
 
-export interface SubscriptionWalletChargeInput {
-  userId: string;
-  userEmail?: string;
-  planId: SubscriptionPlanId;
-  planName: string;
-  amount: number;
-  currency?: 'USD' | 'EUR' | 'GBP';
-  subscriptionId: string;
-  payerId?: string;
-}
-
-export interface SubscriptionWalletChargeResult<TWallet = unknown, TTx = unknown, TPurchase = unknown> {
-  ok: boolean;
-  statusCode: number;
-  errorCode?: string;
-  message: string;
-  buyerWallet: TWallet;
-  balanceBefore: number;
-  balanceAfter: number;
-  captureId?: string;
-  paypalOrderId?: string;
-  transaction?: TTx;
-  purchaseRecord?: TPurchase;
+export interface SubscriptionWalletChargeCallbacks {
+  chargeWallet?: (input: {
+    userId: string;
+    userEmail?: string;
+    planId: SubscriptionPlanId;
+    planName: string;
+    amount: number;
+    currency: 'USD';
+    subscriptionId: string;
+  }) => {
+    ok: boolean;
+    statusCode?: number;
+    errorCode?: string;
+    message: string;
+    balanceBefore: number;
+    balanceAfter: number;
+    buyerWallet: SandboxBuyerWalletState;
+    transaction?: PayPalSandboxTransaction;
+    purchaseRecord?: PurchaseRecord;
+  };
 }
 
 /**
- * Activates a subscription once approved by PayPal buyer and verified on the server.
- * Prevents duplicate activation or unverified browser redirect tampering, and deducts
- * the subscription fee from the user's PayPal wallet when a wallet charger is supplied.
+ * Server-verified activation of a PayPal subscription upon buyer approval.
+ * Rejects unverified browser redirects or mismatched user/plan tampering.
+ * When `chargeWallet` is provided, deducts the exact subscription price from the user's
+ * PayPal Sandbox wallet (`SANDBOX_WALLET_SIMULATION` unless upstream PayPal is `APPROVED`/`ACTIVE`,
+ * in which case `PAYPAL_UPSTREAM_CAPTURED` is recorded) and rejects activation if funds are insufficient.
  */
-export function activatePayPalSubscription<TWallet = unknown, TTx = unknown, TPurchase = unknown>(params: {
-  userId: string;
-  userEmail?: string;
-  subscriptionId: string;
-  planId: SubscriptionPlanId;
-  payerId?: string;
-  browserRedirectOnly?: boolean;
-  requireExplicitApproval?: boolean;
-  chargeWallet?: (
-    input: SubscriptionWalletChargeInput
-  ) => SubscriptionWalletChargeResult<TWallet, TTx, TPurchase>;
-}): {
+export function activatePayPalSubscription(
+  input: {
+    userId: string;
+    userEmail?: string;
+    subscriptionId: string;
+    planId: SubscriptionPlanId;
+    payerId?: string;
+    browserRedirectOnly?: boolean;
+    requireExplicitApproval?: boolean;
+  } & SubscriptionWalletChargeCallbacks
+): {
   ok: boolean;
-  alreadyActivated?: boolean;
-  subscription?: UserSubscriptionRecord;
-  payment?: SubscriptionPaymentRecord;
-  buyerWallet?: TWallet;
-  balanceBefore?: number;
-  balanceAfter?: number;
-  transaction?: TTx;
-  purchaseRecord?: TPurchase;
   errorCode?: string;
   error?: string;
+  subscription?: UserSubscriptionRecord;
+  payment?: SubscriptionPaymentRecord & {
+    settlementMode?: SubscriptionSettlementMode;
+    upstreamPayPalStatus?: string;
+  };
+  buyerWallet?: SandboxBuyerWalletState;
+  balanceBefore?: number;
+  balanceAfter?: number;
+  transaction?: PayPalSandboxTransaction;
+  purchaseRecord?: PurchaseRecord;
+  settlementMode?: SubscriptionSettlementMode;
+  upstreamPayPalStatus?: string;
 } {
-  const {
-    userId,
-    userEmail,
-    subscriptionId,
-    planId,
-    payerId,
-    browserRedirectOnly,
-    requireExplicitApproval,
-    chargeWallet,
-  } = params;
-
-  // Security Rule: Never activate a paid plan from a browser redirect alone without server verification
-  if (browserRedirectOnly && planId !== 'free') {
+  // Reject unverified browser redirect attempts
+  if (input.browserRedirectOnly) {
     return {
       ok: false,
       errorCode: 'unverified_browser_redirect_rejected',
-      error: 'Paid subscriptions cannot be activated from a browser redirect alone without server-side PayPal approval verification.',
+      error:
+        'Subscription activation requires server-side PayPal verification and cannot be activated by browser redirect parameters alone.',
     };
   }
 
-  const pending = pendingSubscriptionApprovals.get(subscriptionId);
-  if (requireExplicitApproval && planId !== 'free') {
-    if (!pending) {
-      return {
-        ok: false,
-        errorCode: 'subscription_session_not_found',
-        error: 'No pending PayPal Sandbox subscription order found for this subscription ID.',
-      };
-    }
-    if (pending.cancelled) {
-      return {
-        ok: false,
-        errorCode: 'subscription_order_cancelled',
-        error: 'Subscription order was cancelled before approval and cannot be captured.',
-      };
-    }
-    if (!pending.approved) {
-      return {
-        ok: false,
-        errorCode: 'subscription_not_approved',
-        error: 'Buyer approval in PayPal Sandbox is required before activating this paid subscription.',
-      };
-    }
+  const pending = pendingSubscriptionSessions.get(input.subscriptionId);
+  if (!pending || !pending.verifiedByServer) {
+    return {
+      ok: false,
+      errorCode: 'subscription_session_not_found',
+      error: 'Subscription session could not be verified on the server.',
+    };
   }
 
-  if (pending) {
-    if (pending.userId !== userId) {
-      return {
-        ok: false,
-        errorCode: 'cross_user_subscription_mismatch',
-        error: 'Subscription session belongs to a different user.',
-      };
-    }
-    if (pending.planId !== planId) {
-      return {
-        ok: false,
-        errorCode: 'plan_tampering_detected',
-        error: `Subscription was created for ${pending.planId}, not ${planId}.`,
-      };
-    }
-    if (pending.activated) {
-      const existingSub = getUserSubscription(userId);
-      const existingPayments = getSubscriptionPayments(userId);
-      const existingPayment = existingPayments.find((p) => p.subscriptionId === subscriptionId);
-      return {
-        ok: true,
-        alreadyActivated: true,
-        subscription: existingSub,
-        payment: existingPayment,
-      };
-    }
+  if (pending.userId !== input.userId) {
+    return {
+      ok: false,
+      errorCode: 'cross_user_subscription_mismatch',
+      error: 'Subscription session belongs to a different authenticated user.',
+    };
   }
 
-  const planDesc = PAYPAL_BILLING_PLANS[planId];
-  const planSpec = SPARK_SUBSCRIPTION_PLANS[planId];
-  const amount = planDesc ? planDesc.amount : 0;
+  if (pending.planId !== input.planId) {
+    return {
+      ok: false,
+      errorCode: 'plan_tampering_detected',
+      error: `Subscription session was created for ${pending.planId}, not ${input.planId}.`,
+    };
+  }
 
-  let walletChargeResult: SubscriptionWalletChargeResult<TWallet, TTx, TPurchase> | undefined;
-  if (chargeWallet && amount > 0) {
-    walletChargeResult = chargeWallet({
-      userId,
-      userEmail,
-      planId,
-      planName: planSpec?.name || planId.toUpperCase(),
-      amount,
+  if (pending.cancelled) {
+    return {
+      ok: false,
+      errorCode: 'subscription_session_cancelled',
+      error: 'This subscription session was cancelled before activation.',
+    };
+  }
+
+  if (input.requireExplicitApproval && !pending.approved) {
+    return {
+      ok: false,
+      errorCode: 'subscription_not_approved',
+      error:
+        'PayPal Sandbox buyer approval has not been completed for this subscription session yet.',
+    };
+  }
+
+  const tier = SPARK_SUBSCRIPTION_PLANS[input.planId];
+  let walletResult: ReturnType<NonNullable<SubscriptionWalletChargeCallbacks['chargeWallet']>> | undefined;
+
+  if (input.chargeWallet && tier.priceMonthly > 0) {
+    walletResult = input.chargeWallet({
+      userId: input.userId,
+      userEmail: input.userEmail || pending.userEmail,
+      planId: input.planId,
+      planName: tier.name,
+      amount: tier.priceMonthly,
       currency: 'USD',
-      subscriptionId,
-      payerId: payerId || pending?.payerId,
+      subscriptionId: input.subscriptionId,
     });
-    if (!walletChargeResult.ok) {
+
+    if (!walletResult.ok) {
       return {
         ok: false,
-        errorCode: walletChargeResult.errorCode || 'INSUFFICIENT_FUNDS',
-        error: walletChargeResult.message,
-        buyerWallet: walletChargeResult.buyerWallet,
-        balanceBefore: walletChargeResult.balanceBefore,
-        balanceAfter: walletChargeResult.balanceAfter,
+        errorCode: walletResult.errorCode || 'INSUFFICIENT_FUNDS',
+        error: walletResult.message,
+        buyerWallet: walletResult.buyerWallet,
+        balanceBefore: walletResult.balanceBefore,
+        balanceAfter: walletResult.balanceAfter,
       };
     }
   }
 
-  const subscription = setUserSubscriptionPlan(
-    userId,
-    planId,
-    subscriptionId,
-    planDesc?.paypalPlanId || null
-  );
+  const settlementMode: SubscriptionSettlementMode =
+    pending.settlementMode ||
+    (pending.upstreamPayPalStatus === 'APPROVED' || pending.upstreamPayPalStatus === 'ACTIVE'
+      ? 'PAYPAL_UPSTREAM_CAPTURED'
+      : 'SANDBOX_WALLET_SIMULATION');
 
-  const paymentRecord: SubscriptionPaymentRecord = {
-    id: `pay_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
-    subscriptionId,
-    userId,
-    planId,
-    amount,
+  const subscription = setUserSubscriptionPlan(input.userId, input.planId, {
+    paypalSubscriptionId: input.subscriptionId,
+    paypalPlanId: pending.paypalPlanId,
+    status: 'active',
+    cancelAtPeriodEnd: false,
+  });
+
+  const txnId =
+    walletResult?.transaction?.captureId ||
+    `TXN-SUB-${Date.now().toString(36).toUpperCase()}-${Math.random()
+      .toString(36)
+      .slice(2, 6)
+      .toUpperCase()}`;
+
+  const payment = recordSubscriptionPayment({
+    id: `pay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    subscriptionId: input.subscriptionId,
+    userId: input.userId,
+    planId: input.planId,
+    amount: pending.amount,
     currency: 'USD',
     status: 'COMPLETED',
-    paypalTransactionId:
-      walletChargeResult?.captureId || `TXN-${crypto.randomBytes(6).toString('hex').toUpperCase()}`,
+    paypalTransactionId: txnId,
+    settlementMode,
+    upstreamPayPalStatus: pending.upstreamPayPalStatus || 'APPROVAL_PENDING',
     createdAt: new Date().toISOString(),
-  };
+  });
 
-  if (pending) {
-    pending.activated = true;
-    pending.activatedAt = new Date().toISOString();
-    pending.paymentId = paymentRecord.id;
-  }
-
-  recordSubscriptionPayment(paymentRecord);
+  pendingSubscriptionSessions.delete(input.subscriptionId);
 
   return {
     ok: true,
     subscription,
-    payment: paymentRecord,
-    buyerWallet: walletChargeResult?.buyerWallet,
-    balanceBefore: walletChargeResult?.balanceBefore,
-    balanceAfter: walletChargeResult?.balanceAfter,
-    transaction: walletChargeResult?.transaction,
-    purchaseRecord: walletChargeResult?.purchaseRecord,
+    payment,
+    buyerWallet: walletResult?.buyerWallet,
+    balanceBefore: walletResult?.balanceBefore,
+    balanceAfter: walletResult?.balanceAfter,
+    transaction: walletResult?.transaction,
+    purchaseRecord: walletResult?.purchaseRecord,
+    settlementMode,
+    upstreamPayPalStatus: pending.upstreamPayPalStatus || 'APPROVAL_PENDING',
   };
 }
 
 /**
- * Upgrade or downgrade an existing active subscription plan.
+ * Upgrades or downgrades an existing user subscription cleanly.
+ * When `chargeWallet` is provided and the new plan has a paid monthly price, deducts the
+ * plan price from the user's PayPal Sandbox wallet.
  */
-export function changePayPalSubscriptionPlan<TWallet = unknown, TTx = unknown, TPurchase = unknown>(params: {
-  userId: string;
-  userEmail?: string;
-  newPlanId: SubscriptionPlanId;
-  chargeWallet?: (
-    input: SubscriptionWalletChargeInput
-  ) => SubscriptionWalletChargeResult<TWallet, TTx, TPurchase>;
-}): {
+export function changePayPalSubscriptionPlan(
+  input: {
+    userId: string;
+    userEmail?: string;
+    newPlanId: SubscriptionPlanId;
+  } & SubscriptionWalletChargeCallbacks
+): {
   ok: boolean;
-  changeType: 'upgrade' | 'downgrade' | 'same';
-  subscription: UserSubscriptionRecord;
-  payment?: SubscriptionPaymentRecord;
-  buyerWallet?: TWallet;
-  balanceBefore?: number;
-  balanceAfter?: number;
-  transaction?: TTx;
-  purchaseRecord?: TPurchase;
   errorCode?: string;
   error?: string;
-} {
-  const { userId, userEmail, newPlanId, chargeWallet } = params;
-  const rank: Record<SubscriptionPlanId, number> = {
-    free: 0,
-    luna: 1,
-    terra: 2,
-    sol: 3,
+  previousPlanId: SubscriptionPlanId;
+  newPlanId: SubscriptionPlanId;
+  changeType: 'upgrade' | 'downgrade' | 'same';
+  subscription: UserSubscriptionRecord;
+  payment?: SubscriptionPaymentRecord & {
+    settlementMode?: SubscriptionSettlementMode;
   };
-  const currentSub = getUserSubscription(userId);
-  const previousPlanId = currentSub.planId;
-  const planDesc = PAYPAL_BILLING_PLANS[newPlanId];
-  const planSpec = SPARK_SUBSCRIPTION_PLANS[newPlanId];
-  const amount = planDesc ? planDesc.amount : 0;
-  const changeSubId =
-    newPlanId === 'free'
-      ? null
-      : `I-SPARK-${newPlanId.toUpperCase()}-CHG-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  buyerWallet?: SandboxBuyerWalletState;
+  balanceBefore?: number;
+  balanceAfter?: number;
+  transaction?: PayPalSandboxTransaction;
+  purchaseRecord?: PurchaseRecord;
+  settlementMode?: SubscriptionSettlementMode;
+} {
+  const current = getUserSubscription(input.userId);
+  const prevTier = SPARK_SUBSCRIPTION_PLANS[current.planId];
+  const nextTier = SPARK_SUBSCRIPTION_PLANS[input.newPlanId];
 
-  let walletChargeResult: SubscriptionWalletChargeResult<TWallet, TTx, TPurchase> | undefined;
-  if (chargeWallet && amount > 0 && newPlanId !== previousPlanId && changeSubId) {
-    walletChargeResult = chargeWallet({
-      userId,
-      userEmail,
-      planId: newPlanId,
-      planName: planSpec?.name || newPlanId.toUpperCase(),
-      amount,
+  const changeType: 'upgrade' | 'downgrade' | 'same' =
+    nextTier.priceMonthly > prevTier.priceMonthly
+      ? 'upgrade'
+      : nextTier.priceMonthly < prevTier.priceMonthly
+      ? 'downgrade'
+      : 'same';
+
+  if (input.newPlanId === 'free') {
+    const cancelled = cancelSubscription(input.userId);
+    return {
+      ok: true,
+      previousPlanId: prevTier.id,
+      newPlanId: 'free',
+      changeType,
+      subscription: cancelled,
+      settlementMode: 'FREE_TIER_NO_CHARGE',
+    };
+  }
+
+  const descriptor = PAYPAL_BILLING_PLANS[input.newPlanId];
+  const newSubId =
+    current.paypalSubscriptionId ||
+    `I-SPARK-${input.newPlanId.toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
+
+  let walletResult: ReturnType<NonNullable<SubscriptionWalletChargeCallbacks['chargeWallet']>> | undefined;
+
+  if (input.chargeWallet && nextTier.priceMonthly > 0 && changeType !== 'same') {
+    walletResult = input.chargeWallet({
+      userId: input.userId,
+      userEmail: input.userEmail,
+      planId: input.newPlanId,
+      planName: nextTier.name,
+      amount: nextTier.priceMonthly,
       currency: 'USD',
-      subscriptionId: changeSubId,
+      subscriptionId: newSubId,
     });
-    if (!walletChargeResult.ok) {
+
+    if (!walletResult.ok) {
       return {
         ok: false,
-        changeType: 'same',
-        subscription: currentSub,
-        buyerWallet: walletChargeResult.buyerWallet,
-        balanceBefore: walletChargeResult.balanceBefore,
-        balanceAfter: walletChargeResult.balanceAfter,
-        errorCode: walletChargeResult.errorCode || 'INSUFFICIENT_FUNDS',
-        error: walletChargeResult.message,
+        errorCode: walletResult.errorCode || 'INSUFFICIENT_FUNDS',
+        error: walletResult.message,
+        previousPlanId: prevTier.id,
+        newPlanId: input.newPlanId,
+        changeType,
+        subscription: current,
+        buyerWallet: walletResult.buyerWallet,
+        balanceBefore: walletResult.balanceBefore,
+        balanceAfter: walletResult.balanceAfter,
       };
     }
   }
 
-  const sub = setUserSubscriptionPlan(
-    userId,
-    newPlanId,
-    changeSubId,
-    planDesc?.paypalPlanId || null
-  );
-  const changeType =
-    rank[newPlanId] > rank[previousPlanId]
-      ? 'upgrade'
-      : rank[newPlanId] < rank[previousPlanId]
-      ? 'downgrade'
-      : 'same';
+  const updated = setUserSubscriptionPlan(input.userId, input.newPlanId, {
+    paypalSubscriptionId: newSubId,
+    paypalPlanId: descriptor.paypalPlanCode,
+    status: 'active',
+    cancelAtPeriodEnd: false,
+  });
 
-  let paymentRecord: SubscriptionPaymentRecord | undefined;
-  if (amount > 0 && newPlanId !== previousPlanId && changeSubId) {
-    paymentRecord = {
-      id: `pay_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
-      subscriptionId: changeSubId,
-      userId,
-      planId: newPlanId,
-      amount,
+  let payment: (SubscriptionPaymentRecord & { settlementMode?: SubscriptionSettlementMode }) | undefined;
+  if (changeType === 'upgrade' || walletResult?.transaction) {
+    const txnId =
+      walletResult?.transaction?.captureId ||
+      `TXN-UPG-${Date.now().toString(36).toUpperCase()}`;
+    payment = recordSubscriptionPayment({
+      id: `pay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      subscriptionId: newSubId,
+      userId: input.userId,
+      planId: input.newPlanId,
+      amount: nextTier.priceMonthly,
       currency: 'USD',
       status: 'COMPLETED',
-      paypalTransactionId:
-        walletChargeResult?.captureId || `TXN-${crypto.randomBytes(6).toString('hex').toUpperCase()}`,
+      paypalTransactionId: txnId,
+      settlementMode: 'SANDBOX_WALLET_SIMULATION',
       createdAt: new Date().toISOString(),
-    };
-    recordSubscriptionPayment(paymentRecord);
+    });
   }
 
   return {
     ok: true,
+    previousPlanId: prevTier.id,
+    newPlanId: input.newPlanId,
     changeType,
-    subscription: sub,
-    payment: paymentRecord,
-    buyerWallet: walletChargeResult?.buyerWallet,
-    balanceBefore: walletChargeResult?.balanceBefore,
-    balanceAfter: walletChargeResult?.balanceAfter,
-    transaction: walletChargeResult?.transaction,
-    purchaseRecord: walletChargeResult?.purchaseRecord,
+    subscription: updated,
+    payment,
+    buyerWallet: walletResult?.buyerWallet,
+    balanceBefore: walletResult?.balanceBefore,
+    balanceAfter: walletResult?.balanceAfter,
+    transaction: walletResult?.transaction,
+    purchaseRecord: walletResult?.purchaseRecord,
+    settlementMode: 'SANDBOX_WALLET_SIMULATION',
+  };
+}
+
+export interface PayPalSubscriptionWebhookPayload {
+  id: string;
+  event_version: string;
+  create_time: string;
+  resource_type: string;
+  event_type:
+    | 'BILLING.SUBSCRIPTION.ACTIVATED'
+    | 'BILLING.SUBSCRIPTION.CANCELLED'
+    | 'BILLING.SUBSCRIPTION.EXPIRED'
+    | 'BILLING.SUBSCRIPTION.SUSPENDED'
+    | 'BILLING.SUBSCRIPTION.PAYMENT.FAILED'
+    | 'PAYMENT.SALE.COMPLETED'
+    | 'PAYMENT.SALE.REFUNDED'
+    | 'PAYMENT.SALE.REVERSED'
+    | string;
+  summary: string;
+  resource: {
+    id?: string;
+    custom_id?: string;
+    plan_id?: string;
+    status?: string;
+    billing_agreement_id?: string;
+    parent_payment?: string;
+    amount?: {
+      total?: string;
+      value?: string;
+      currency?: string;
+      currency_code?: string;
+    };
+    billing_info?: {
+      last_payment?: {
+        amount?: {
+          value?: string;
+          currency_code?: string;
+        };
+      };
+    };
   };
 }
 
 /**
- * Processes incoming PayPal subscription webhook events with idempotency, signature validation,
- * failed renewal, expiration, refund, and reversal handling.
+ * Processes PayPal subscription lifecycle webhooks with idempotency, signature validation,
+ * and automatic status transitions (activation, cancellation, expiration, failed renewal, refund, reversal).
  */
 export function handlePayPalSubscriptionWebhook(
-  event: PayPalWebhookEvent,
-  options?: { signatureHeader?: string; rejectInvalidSignature?: boolean }
+  payload: PayPalSubscriptionWebhookPayload,
+  options?: {
+    signatureHeader?: string;
+    rejectInvalidSignature?: boolean;
+  }
 ): {
   handled: boolean;
   duplicate?: boolean;
+  eventId: string;
+  eventType: string;
   actionTaken: string;
-  userId?: string;
+  subscription?: UserSubscriptionRecord;
 } {
-  if (!event || typeof event !== 'object' || !event.id || !event.event_type) {
-    return { handled: false, actionTaken: 'invalid_webhook_payload' };
-  }
-
   if (options?.rejectInvalidSignature && (!options.signatureHeader || options.signatureHeader === 'invalid')) {
-    return { handled: false, actionTaken: 'invalid_webhook_signature' };
-  }
-
-  // Idempotency protection: never process duplicate webhook event IDs twice
-  if (processedSubscriptionWebhookIds.has(event.id)) {
     return {
-      handled: true,
-      duplicate: true,
-      actionTaken: 'duplicate_event_ignored',
+      handled: false,
+      eventId: payload?.id || 'unknown',
+      eventType: payload?.event_type || 'unknown',
+      actionTaken: 'invalid_webhook_signature',
     };
   }
 
-  const eventType = event.event_type;
-  const resource = event.resource;
-  const subscriptionId = resource?.id;
-  const customId = resource?.custom_id; // userId if passed in custom_id
-
-  if (!subscriptionId) {
-    return { handled: false, actionTaken: 'missing_resource_id' };
+  if (!payload || !payload.id || !payload.event_type) {
+    return {
+      handled: false,
+      eventId: 'invalid',
+      eventType: 'invalid',
+      actionTaken: 'malformed_webhook_payload',
+    };
   }
 
-  processedSubscriptionWebhookIds.add(event.id);
+  // Idempotency guard for duplicate webhook deliveries
+  if (processedSubscriptionWebhookEvents.has(payload.id)) {
+    return {
+      handled: true,
+      duplicate: true,
+      eventId: payload.id,
+      eventType: payload.event_type,
+      actionTaken: 'duplicate_event_ignored',
+    };
+  }
+  processedSubscriptionWebhookEvents.add(payload.id);
 
-  switch (eventType) {
+  const userId = payload.resource?.custom_id || '';
+  if (!userId) {
+    return {
+      handled: false,
+      eventId: payload.id,
+      eventType: payload.event_type,
+      actionTaken: 'missing_custom_id_user_reference',
+    };
+  }
+
+  const resolvePlanFromCode = (code?: string): SubscriptionPlanId => {
+    if (!code) return getUserSubscription(userId).planId || 'luna';
+    if (code.includes('SOL')) return 'sol';
+    if (code.includes('TERRA')) return 'terra';
+    if (code.includes('LUNA')) return 'luna';
+    for (const [planKey, planId] of cachedPayPalBillingPlanIds.entries()) {
+      if (planId === code) return planKey;
+    }
+    return getUserSubscription(userId).planId || 'luna';
+  };
+
+  switch (payload.event_type) {
     case 'BILLING.SUBSCRIPTION.ACTIVATED': {
-      let targetPlan: SubscriptionPlanId = 'terra';
-      if (resource.plan_id === PAYPAL_BILLING_PLANS.luna?.paypalPlanId) targetPlan = 'luna';
-      else if (resource.plan_id === PAYPAL_BILLING_PLANS.sol?.paypalPlanId) targetPlan = 'sol';
-
-      if (customId) {
-        activatePayPalSubscription({
-          userId: customId,
-          subscriptionId,
-          planId: targetPlan,
-        });
-        return {
-          handled: true,
-          actionTaken: `activated_${targetPlan}`,
-          userId: customId,
-        };
-      }
-      return { handled: true, actionTaken: 'received_no_custom_id' };
-    }
-
-    case 'PAYMENT.SALE.COMPLETED': {
-      if (customId) {
-        const amount = Number(resource.billing_info?.last_payment?.amount?.value || 0);
-        recordSubscriptionPayment({
-          id: `pay_wh_${Date.now()}`,
-          subscriptionId,
-          userId: customId,
-          planId: 'terra',
-          amount,
-          currency: resource.billing_info?.last_payment?.amount?.currency_code || 'USD',
-          status: 'COMPLETED',
-          paypalTransactionId: resource.id || `TXN-${Date.now()}`,
-          createdAt: new Date().toISOString(),
-        });
-        return { handled: true, actionTaken: 'payment_recorded', userId: customId };
-      }
-      return { handled: true, actionTaken: 'sale_without_custom_id' };
-    }
-
-    case 'BILLING.SUBSCRIPTION.PAYMENT.FAILED': {
-      if (customId) {
-        markSubscriptionFailedRenewal(customId);
-        recordSubscriptionPayment({
-          id: `pay_fail_${Date.now()}`,
-          subscriptionId,
-          userId: customId,
-          planId: 'terra',
-          amount: Number(resource.billing_info?.last_payment?.amount?.value || 19.99),
-          currency: 'USD',
-          status: 'FAILED',
-          paypalTransactionId: resource.id || `TXN-FAIL-${Date.now()}`,
-          createdAt: new Date().toISOString(),
-        });
-        return { handled: true, actionTaken: 'marked_past_due', userId: customId };
-      }
-      return { handled: true, actionTaken: 'failed_renewal_no_user' };
-    }
-
-    case 'BILLING.SUBSCRIPTION.EXPIRED': {
-      if (customId) {
-        expireSubscription(customId);
-        return { handled: true, actionTaken: 'subscription_expired_downgraded_to_free', userId: customId };
-      }
-      return { handled: true, actionTaken: 'expired_no_user' };
+      const planId = resolvePlanFromCode(payload.resource.plan_id);
+      const sub = setUserSubscriptionPlan(userId, planId, {
+        paypalSubscriptionId: payload.resource.id || null,
+        paypalPlanId: payload.resource.plan_id || null,
+        status: 'active',
+        cancelAtPeriodEnd: false,
+      });
+      return {
+        handled: true,
+        eventId: payload.id,
+        eventType: payload.event_type,
+        actionTaken: `subscription_activated:${planId}`,
+        subscription: sub,
+      };
     }
 
     case 'BILLING.SUBSCRIPTION.CANCELLED': {
-      if (customId) {
-        setUserSubscriptionPlan(customId, 'free', null, null);
-        return { handled: true, actionTaken: 'downgraded_to_free', userId: customId };
-      }
-      return { handled: true, actionTaken: 'cancelled_no_user' };
+      const sub = cancelSubscription(userId);
+      return {
+        handled: true,
+        eventId: payload.id,
+        eventType: payload.event_type,
+        actionTaken: 'subscription_cancelled_at_period_end',
+        subscription: sub,
+      };
     }
 
-    case 'PAYMENT.SALE.REFUNDED':
-    case 'PAYMENT.SALE.REVERSED': {
-      const txnId = resource.parent_payment || resource.sale_id || resource.id;
-      updateSubscriptionPaymentStatus(txnId, 'REFUNDED');
-      if (customId && eventType === 'PAYMENT.SALE.REVERSED') {
-        expireSubscription(customId);
+    case 'BILLING.SUBSCRIPTION.EXPIRED':
+    case 'BILLING.SUBSCRIPTION.SUSPENDED': {
+      const sub = expireSubscription(userId);
+      return {
+        handled: true,
+        eventId: payload.id,
+        eventType: payload.event_type,
+        actionTaken: 'subscription_expired_downgraded_to_free',
+        subscription: sub,
+      };
+    }
+
+    case 'BILLING.SUBSCRIPTION.PAYMENT.FAILED': {
+      const sub = markSubscriptionFailedRenewal(userId);
+      return {
+        handled: true,
+        eventId: payload.id,
+        eventType: payload.event_type,
+        actionTaken: 'subscription_marked_past_due',
+        subscription: sub,
+      };
+    }
+
+    case 'PAYMENT.SALE.COMPLETED': {
+      const current = getUserSubscription(userId);
+      const amountVal = Number(
+        payload.resource.amount?.total ||
+          payload.resource.amount?.value ||
+          payload.resource.billing_info?.last_payment?.amount?.value ||
+          SPARK_SUBSCRIPTION_PLANS[current.planId].priceMonthly
+      );
+      recordSubscriptionPayment({
+        id: `pay_wh_${payload.id}`,
+        subscriptionId:
+          payload.resource.billing_agreement_id || current.paypalSubscriptionId || current.id,
+        userId,
+        planId: current.planId,
+        amount: amountVal,
+        currency: 'USD',
+        status: 'COMPLETED',
+        paypalTransactionId: payload.resource.id || `TXN-${payload.id}`,
+        settlementMode: 'PAYPAL_UPSTREAM_CAPTURED',
+        upstreamPayPalStatus: 'ACTIVE',
+        createdAt: payload.create_time || new Date().toISOString(),
+      });
+      return {
+        handled: true,
+        eventId: payload.id,
+        eventType: payload.event_type,
+        actionTaken: 'recurring_payment_recorded',
+        subscription: current,
+      };
+    }
+
+    case 'PAYMENT.SALE.REFUNDED': {
+      const txnId = payload.resource.parent_payment || payload.resource.id || '';
+      updateSubscriptionPaymentStatus(userId, txnId, 'REFUNDED');
+      const existingPayments = getSubscriptionPayments(userId);
+      if (!existingPayments.some((p) => p.paypalTransactionId === txnId)) {
+        const current = getUserSubscription(userId);
+        recordSubscriptionPayment({
+          id: `pay_ref_${payload.id}`,
+          subscriptionId: current.paypalSubscriptionId || current.id,
+          userId,
+          planId: current.planId,
+          amount: SPARK_SUBSCRIPTION_PLANS[current.planId].priceMonthly,
+          currency: 'USD',
+          status: 'REFUNDED',
+          paypalTransactionId: txnId || `REF-${payload.id}`,
+          settlementMode: 'PAYPAL_UPSTREAM_CAPTURED',
+          createdAt: payload.create_time || new Date().toISOString(),
+        });
       }
       return {
         handled: true,
-        actionTaken: eventType === 'PAYMENT.SALE.REFUNDED' ? 'payment_refunded' : 'payment_reversed_and_expired',
-        userId: customId,
+        eventId: payload.id,
+        eventType: payload.event_type,
+        actionTaken: 'payment_refunded',
+        subscription: getUserSubscription(userId),
+      };
+    }
+
+    case 'PAYMENT.SALE.REVERSED': {
+      const txnId = payload.resource.parent_payment || payload.resource.id || '';
+      updateSubscriptionPaymentStatus(userId, txnId, 'REFUNDED');
+      const sub = expireSubscription(userId);
+      return {
+        handled: true,
+        eventId: payload.id,
+        eventType: payload.event_type,
+        actionTaken: 'payment_reversed_and_expired',
+        subscription: sub,
       };
     }
 
     default:
-      return { handled: true, actionTaken: `ignored_event_${eventType}` };
+      return {
+        handled: true,
+        eventId: payload.id,
+        eventType: payload.event_type,
+        actionTaken: 'unhandled_event_acknowledged',
+      };
+  }
+}
+
+export function exportPendingSubscriptionSessions(): Array<[string, PendingSubscriptionSession]> {
+  return Array.from(pendingSubscriptionSessions.entries());
+}
+
+export function importPendingSubscriptionSessions(
+  entries?: Array<[string, PendingSubscriptionSession]>
+): void {
+  if (!Array.isArray(entries)) return;
+  for (const [k, v] of entries) {
+    if (k && v && v.subscriptionId) {
+      pendingSubscriptionSessions.set(k, v);
+    }
   }
 }

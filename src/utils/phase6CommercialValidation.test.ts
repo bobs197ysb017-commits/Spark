@@ -15,6 +15,7 @@ import {
   validatePayPalSandboxConfig,
   resolvePayPalEnvironmentConfig,
 } from './paypalSandboxService';
+import { discoverRuntimePayPalCredentials } from './paypalSubscriptionService';
 import { isChannel3CredentialConfigured } from './channel3Adapter';
 import type {
   ProductOffer,
@@ -22,6 +23,8 @@ import type {
   UserCartSummary,
   PurchaseRecord,
 } from '../types/spark';
+
+discoverRuntimePayPalCredentials();
 
 const LOCAL_SERVER_BASE = 'http://127.0.0.1:3000';
 
@@ -690,7 +693,68 @@ test('Batch E — Subscriptions & Quota Lifecycle across Luna, Terra, and Sol', 
       body: JSON.stringify({ balance: 500 }),
     });
 
-    // Activate Luna
+    // 1. Create a real PayPal Sandbox subscription for Luna via /api/subscriptions/create
+    const createRes = await fetch(`${LOCAL_SERVER_BASE}/api/subscriptions/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+        'X-CSRF-Token': csrfToken,
+      },
+      body: JSON.stringify({
+        planId: 'luna',
+      }),
+    });
+    assert.equal(createRes.status, 200);
+    const createJson = await createRes.json();
+    assert.equal(createJson.ok, true);
+    assert.equal(createJson.upstreamCreatedLive, true, 'Must create real PayPal Sandbox subscription');
+    assert.ok(
+      createJson.subscriptionId.startsWith('I-') && !createJson.subscriptionId.startsWith('I-SPARK-'),
+      `Expected real PayPal subscriptionId (I-...), got ${createJson.subscriptionId}`
+    );
+    assert.ok(
+      createJson.approvalUrl.includes('sandbox.paypal.com/webapps/billing/subscriptions?ba_token=BA-'),
+      `Expected official PayPal Sandbox approvalUrl, got ${createJson.approvalUrl}`
+    );
+
+    // 2. Attempting to activate BEFORE approval must be rejected by server even if client sends requireExplicitApproval: false
+    const prematureActivateRes = await fetch(`${LOCAL_SERVER_BASE}/api/subscriptions/activate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+        'X-CSRF-Token': csrfToken,
+      },
+      body: JSON.stringify({
+        planId: 'luna',
+        subscriptionId: createJson.subscriptionId,
+        requireExplicitApproval: false,
+      }),
+    });
+    assert.equal(prematureActivateRes.status, 400);
+    const prematureJson = await prematureActivateRes.json();
+    assert.equal(prematureJson.ok, false);
+    assert.equal(prematureJson.errorCode, 'subscription_not_approved');
+
+    // 3. Record explicit buyer approval
+    const approveRes = await fetch(`${LOCAL_SERVER_BASE}/api/subscriptions/approve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+        'X-CSRF-Token': csrfToken,
+      },
+      body: JSON.stringify({
+        subscriptionId: createJson.subscriptionId,
+        payerId: `PAYER-SUB-${userId.slice(0, 8)}`,
+      }),
+    });
+    assert.equal(approveRes.status, 200);
+    const approveJson = await approveRes.json();
+    assert.equal(approveJson.ok, true);
+
+    // 4. Activate Luna after approval
     const activateRes = await fetch(`${LOCAL_SERVER_BASE}/api/subscriptions/activate`, {
       method: 'POST',
       headers: {
@@ -700,13 +764,14 @@ test('Batch E — Subscriptions & Quota Lifecycle across Luna, Terra, and Sol', 
       },
       body: JSON.stringify({
         planId: 'luna',
-        subscriptionId: `I-SUB-LUNA-${Date.now()}`,
+        subscriptionId: createJson.subscriptionId,
       }),
     });
     assert.equal(activateRes.status, 200);
     const activateJson = await activateRes.json();
     assert.equal(activateJson.subscription.planId, 'luna');
     assert.equal(activateJson.quotaStatus.limits.searches, 120);
+    assert.equal(activateJson.settlementMode, 'SANDBOX_WALLET_SIMULATION');
 
     // Upgrade to Terra
     const upgradeRes = await fetch(`${LOCAL_SERVER_BASE}/api/subscriptions/change-plan`, {
@@ -787,8 +852,6 @@ test('Batch E — Subscriptions & Quota Lifecycle across Luna, Terra, and Sol', 
 
 test('Batch F — Security, Data Isolation, Rate Limiting & Tampering Prevention', async (t) => {
   await t.test('1. Rate limiting on authentication and search endpoints', async () => {
-    const ip = '127.0.0.1';
-    // Ensure rate limiter works without server crash
     const healthRes = await fetch(`${LOCAL_SERVER_BASE}/api/health`);
     assert.equal(healthRes.status, 200);
   });
@@ -807,12 +870,39 @@ test('Batch F — Security, Data Isolation, Rate Limiting & Tampering Prevention
     assert.equal(injectJson.errorCode, 'malicious_injection_payload_blocked');
   });
 
-  await t.test('3. Cross-user IDOR protection on private conversations and cart', async () => {
+  await t.test('3. Cross-user IDOR protection on private conversations, cart, and subscription endpoints', async () => {
     // Attempt to access without auth
     const unauthCart = await fetch(`${LOCAL_SERVER_BASE}/api/cart`);
     assert.equal(unauthCart.status, 401);
 
     const unauthPurchases = await fetch(`${LOCAL_SERVER_BASE}/api/purchases`);
     assert.equal(unauthPurchases.status, 401);
+
+    // Subscription endpoints must strictly reject unauthenticated requests even if userId is supplied
+    const unauthSubMe = await fetch(`${LOCAL_SERVER_BASE}/api/subscriptions/me?userId=spoofed_victim`);
+    assert.equal(unauthSubMe.status, 401);
+
+    const unauthSubCreate = await fetch(`${LOCAL_SERVER_BASE}/api/subscriptions/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'spoofed_victim', planId: 'sol' }),
+    });
+    assert.equal(unauthSubCreate.status, 401);
+
+    const unauthSubActivate = await fetch(`${LOCAL_SERVER_BASE}/api/subscriptions/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: 'spoofed_victim',
+        planId: 'sol',
+        subscriptionId: 'I-SPOOF',
+        requireExplicitApproval: false,
+      }),
+    });
+    assert.equal(unauthSubActivate.status, 401);
+
+    const unauthDataExport = await fetch(`${LOCAL_SERVER_BASE}/api/user/data-export?userId=spoofed_victim`);
+    assert.equal(unauthDataExport.status, 401);
   });
 });
+

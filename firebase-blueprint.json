@@ -739,6 +739,108 @@
         "cancelAtPeriodEnd",
         "updatedAt"
       ]
+    },
+    "UserUsageQuotaDoc": {
+      "title": "UserUsageQuotaDoc",
+      "description": "Atomic per-period quota and usage counters for a user stored under /users/{userId}/usage_quotas/{periodId}",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Firebase Auth UID" },
+        "periodId": { "type": "string", "description": "Billing period key (e.g. period-2026-11)" },
+        "periodStart": { "type": "string", "format": "date-time" },
+        "periodEnd": { "type": "string", "format": "date-time" },
+        "searchesUsed": { "type": "integer", "minimum": 0 },
+        "comparisonsUsed": { "type": "integer", "minimum": 0 },
+        "checkoutsUsed": { "type": "integer", "minimum": 0 },
+        "CsvExportsUsed": { "type": "integer", "minimum": 0 },
+        "agentTokensUsed": { "type": "integer", "minimum": 0 },
+        "estimatedCostUsd": { "type": "number", "minimum": 0 },
+        "revision": { "type": "integer", "minimum": 1, "description": "Monotonically increasing atomic revision counter" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "periodId",
+        "periodStart",
+        "periodEnd",
+        "searchesUsed",
+        "comparisonsUsed",
+        "checkoutsUsed",
+        "CsvExportsUsed",
+        "agentTokensUsed",
+        "estimatedCostUsd",
+        "revision",
+        "updatedAt"
+      ]
+    },
+    "SubscriptionPaymentDoc": {
+      "title": "SubscriptionPaymentDoc",
+      "description": "Subscription payment record distinguishing real PayPal Sandbox capture from simulated wallet deduction",
+      "type": "object",
+      "properties": {
+        "paymentId": { "type": "string" },
+        "subscriptionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "planId": { "type": "string", "enum": ["free", "luna", "terra", "sol"] },
+        "amountUsd": { "type": "number", "minimum": 0 },
+        "currency": { "type": "string", "enum": ["USD"] },
+        "status": { "type": "string", "enum": ["COMPLETED", "REFUNDED", "FAILED", "PENDING_APPROVAL"] },
+        "settlementMode": { "type": "string", "enum": ["PAYPAL_UPSTREAM_CAPTURED", "SANDBOX_WALLET_SIMULATION", "FREE_TIER_NO_CHARGE"] },
+        "paypalOrderId": { "type": "string" },
+        "paypalCaptureId": { "type": "string" },
+        "billingPeriod": { "type": "string", "enum": ["monthly", "annual"] },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "paymentId",
+        "subscriptionId",
+        "userId",
+        "planId",
+        "amountUsd",
+        "currency",
+        "status",
+        "settlementMode",
+        "paypalOrderId",
+        "paypalCaptureId",
+        "billingPeriod",
+        "description",
+        "createdAt"
+      ]
+    },
+    "SubscriptionApprovalDoc": {
+      "title": "SubscriptionApprovalDoc",
+      "description": "Server-verified PayPal subscription approval state under /users/{userId}/subscription_approvals/{subscriptionId}",
+      "type": "object",
+      "properties": {
+        "subscriptionId": { "type": "string" },
+        "paypalOrderId": { "type": "string" },
+        "paypalPlanId": { "type": "string" },
+        "userId": { "type": "string" },
+        "planId": { "type": "string", "enum": ["free", "luna", "terra", "sol"] },
+        "billingPeriod": { "type": "string", "enum": ["monthly", "annual"] },
+        "amountUsd": { "type": "number", "minimum": 0 },
+        "currency": { "type": "string", "enum": ["USD"] },
+        "status": { "type": "string", "enum": ["APPROVAL_PENDING", "APPROVED", "ACTIVE", "CANCELLED", "EXPIRED"] },
+        "settlementMode": { "type": "string", "enum": ["PAYPAL_UPSTREAM_CAPTURED", "SANDBOX_WALLET_SIMULATION", "FREE_TIER_NO_CHARGE"] },
+        "approvalUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "subscriptionId",
+        "paypalOrderId",
+        "userId",
+        "planId",
+        "billingPeriod",
+        "amountUsd",
+        "currency",
+        "status",
+        "settlementMode",
+        "approvalUrl",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -769,6 +871,18 @@
     "/users/{userId}/subscriptions/{subDocId}": {
       "schema": { "$ref": "#/entities/UserSubscriptionDoc" },
       "description": "User-owned subscription plan state"
+    },
+    "/users/{userId}/usage_quotas/{periodId}": {
+      "schema": { "$ref": "#/entities/UserUsageQuotaDoc" },
+      "description": "Atomic per-period feature quota usage counters strictly isolated under the owner UID"
+    },
+    "/users/{userId}/subscription_payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/SubscriptionPaymentDoc" },
+      "description": "Subscription payment and settlement audit records strictly isolated under the owner UID"
+    },
+    "/users/{userId}/subscription_approvals/{subscriptionId}": {
+      "schema": { "$ref": "#/entities/SubscriptionApprovalDoc" },
+      "description": "PayPal subscription approval sessions strictly isolated under the owner UID"
     },
     "/users/{userId}/purchases/{purchaseId}": {
       "schema": { "$ref": "#/entities/PurchaseDoc" },

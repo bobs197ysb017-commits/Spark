@@ -410,3 +410,104 @@ test('8. Two-Step Explicit PayPal Subscription Approval & Pending Cancellation',
   assert.equal(cancelledPending.ok, true);
   assert.equal(cancelledPending.session?.cancelled, true);
 });
+
+test('9. Atomic Quota Reservation, Concurrent Overrun Prevention & Rollback on Failure', async () => {
+  const { releaseFeatureQuotaReservation } = await import('./subscriptionQuotaEngine');
+  const userId = `atomic_quota_${Date.now()}`;
+  setUserSubscriptionPlan(userId, 'free'); // Free limit = 3 workflows, 15 searches
+
+  // Launch 6 concurrent workflow quota reservations simultaneously against a limit of 3
+  const concurrentAttempts = await Promise.all(
+    Array.from({ length: 6 }, (_, i) =>
+      Promise.resolve().then(() => reserveFeatureQuota(userId, 'workflow', `concurrent_op_${i}`))
+    )
+  );
+
+  const allowedAttempts = concurrentAttempts.filter((r) => r.allowed);
+  const rejectedAttempts = concurrentAttempts.filter((r) => !r.allowed);
+
+  // Exactly 3 must succeed and 3 must be rejected — zero overrun allowed!
+  assert.equal(allowedAttempts.length, 3, 'Exactly 3 reservations must succeed for Free plan');
+  assert.equal(rejectedAttempts.length, 3, 'Remaining 3 concurrent reservations must be blocked');
+  assert.equal(getUserQuotaStatus(userId).usage.workflowsUsed, 3);
+  assert.equal(getUserQuotaStatus(userId).remaining.workflows, 0);
+
+  // Simulate workflow #2 failing before completion -> release its reservation
+  const failedResId = allowedAttempts[1].reservationId;
+  releaseFeatureQuotaReservation(userId, 'workflow', failedResId);
+  assert.equal(
+    getUserQuotaStatus(userId).usage.workflowsUsed,
+    2,
+    'Releasing a failed workflow reservation must roll back workflowsUsed from 3 to 2'
+  );
+  assert.equal(getUserQuotaStatus(userId).remaining.workflows, 1);
+
+  // Commit workflow #1 and workflow #3 via recordFeatureUsage -> must NOT double-increment workflowsUsed!
+  recordFeatureUsage(userId, 'workflow', 1200, 0.004, allowedAttempts[0].reservationId);
+  recordFeatureUsage(userId, 'workflow', 1500, 0.005, allowedAttempts[2].reservationId);
+  assert.equal(
+    getUserQuotaStatus(userId).usage.workflowsUsed,
+    2,
+    'Committing reserved workflows via recordFeatureUsage must not double-increment workflowsUsed'
+  );
+  assert.equal(getUserQuotaStatus(userId).usage.totalTokensEstimated, 2700);
+});
+
+test('10. Live PayPal Sandbox Billing Subscriptions API (Product, Plan, Subscription & Upstream Status)', async () => {
+  const {
+    createPayPalSubscriptionLive,
+    fetchUpstreamPayPalSubscriptionDetails,
+    approvePayPalSubscriptionLive,
+    discoverRuntimePayPalCredentials,
+  } = await import('./paypalSubscriptionService');
+
+  const creds = discoverRuntimePayPalCredentials();
+  assert.equal(creds.environment, 'sandbox', 'PayPal environment must be sandbox');
+  assert.ok(creds.clientId.length > 10, 'Live PayPal Sandbox clientId must be present');
+
+  const userId = `live_pp_sub_${Date.now()}`;
+  const liveSub = await createPayPalSubscriptionLive({
+    userId,
+    userEmail: 'live-sandbox-buyer@spark.app',
+    planId: 'luna',
+  });
+
+  assert.equal(liveSub.ok, true);
+  assert.equal(liveSub.upstreamCreatedLive, true, 'Must create a real upstream PayPal Sandbox subscription');
+  assert.ok(
+    liveSub.subscriptionId.startsWith('I-') && !liveSub.subscriptionId.startsWith('I-SPARK-'),
+    `Expected real PayPal subscription ID starting with I-, got ${liveSub.subscriptionId}`
+  );
+  assert.ok(
+    liveSub.paypalPlanId.startsWith('P-'),
+    `Expected real PayPal billing plan ID starting with P-, got ${liveSub.paypalPlanId}`
+  );
+  assert.ok(
+    liveSub.paypalProductId?.startsWith('PROD-'),
+    `Expected real PayPal product ID starting with PROD-, got ${liveSub.paypalProductId}`
+  );
+  assert.ok(
+    liveSub.approvalUrl.includes('sandbox.paypal.com/webapps/billing/subscriptions?ba_token=BA-'),
+    `Expected official PayPal Sandbox approval URL with BA- token, got ${liveSub.approvalUrl}`
+  );
+
+  // Verify directly with PayPal Sandbox GET /v1/billing/subscriptions/{id}
+  const upstreamDetails = await fetchUpstreamPayPalSubscriptionDetails(liveSub.subscriptionId);
+  assert.ok(upstreamDetails, 'Upstream PayPal Sandbox subscription must be retrievable via GET');
+  assert.equal(upstreamDetails!.id, liveSub.subscriptionId);
+  assert.equal(upstreamDetails!.status, 'APPROVAL_PENDING');
+
+  // Verify explicit distinction between simulated wallet deduction and upstream capture
+  const approved = await approvePayPalSubscriptionLive({
+    userId,
+    subscriptionId: liveSub.subscriptionId,
+    payerId: 'PAYER-SANDBOX-LIVE-TEST',
+  });
+  assert.equal(approved.ok, true);
+  assert.equal(
+    approved.session?.settlementMode,
+    'SANDBOX_WALLET_SIMULATION',
+    'While upstream PayPal status is APPROVAL_PENDING, in-app approval must explicitly record SANDBOX_WALLET_SIMULATION'
+  );
+});
+

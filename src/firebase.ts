@@ -1556,39 +1556,187 @@ export async function syncUserSubscriptionToFirestore(
     billingCycle: string;
     monthlyPriceUsd: number;
     paypalSubscriptionId?: string | null;
+    paypalPlanId?: string | null;
+    settlementMode?: 'PAYPAL_UPSTREAM_CAPTURED' | 'SANDBOX_WALLET_SIMULATION' | 'FREE_TIER_NO_CHARGE';
+    upstreamPayPalStatus?: string | null;
     cancelAtPeriodEnd: boolean;
   }
 ): Promise<void> {
   if (!auth.currentUser || auth.currentUser.uid !== uid) return;
   const path = `users/${uid}/subscriptions/current`;
+  const subRef = doc(db, 'users', uid, 'subscriptions', 'current');
   try {
-    const existingSnap = await getDoc(doc(db, 'users', uid, 'subscriptions', 'current'));
-    const payload = {
-      userId: uid,
-      planId: subscription.planId,
-      status: sanitizeString(subscription.status || 'active', 32, 'active'),
-      billingCycle: sanitizeString(subscription.billingCycle || 'monthly', 32, 'monthly'),
-      monthlyPriceUsd: Math.max(0, Number(subscription.monthlyPriceUsd) || 0),
-      ...(subscription.paypalSubscriptionId
-        ? {
-            paypalSubscriptionId: sanitizeString(
-              subscription.paypalSubscriptionId,
-              128,
-              'I-SPARK'
-            ),
-          }
-        : {}),
-      cancelAtPeriodEnd: Boolean(subscription.cancelAtPeriodEnd),
-      updatedAt: serverTimestamp(),
-    };
-    if (existingSnap.exists()) {
-      await updateDoc(doc(db, 'users', uid, 'subscriptions', 'current'), payload);
-    } else {
-      await setDoc(doc(db, 'users', uid, 'subscriptions', 'current'), {
-        ...payload,
+    await runTransaction(db, async (tx) => {
+      const existingSnap = await tx.get(subRef);
+      const payload: Record<string, unknown> = {
+        userId: uid,
+        planId: subscription.planId,
+        status: sanitizeString(subscription.status || 'active', 32, 'active'),
+        billingCycle: sanitizeString(subscription.billingCycle || 'monthly', 32, 'monthly'),
+        monthlyPriceUsd: Math.max(0, Number(subscription.monthlyPriceUsd) || 0),
+        ...(subscription.paypalSubscriptionId
+          ? {
+              paypalSubscriptionId: sanitizeString(
+                subscription.paypalSubscriptionId,
+                128,
+                'I-SPARK'
+              ),
+            }
+          : {}),
+        ...(subscription.paypalPlanId
+          ? {
+              paypalPlanId: sanitizeString(subscription.paypalPlanId, 128, 'P-SPARK'),
+            }
+          : {}),
+        ...(subscription.settlementMode
+          ? {
+              settlementMode: subscription.settlementMode,
+            }
+          : {}),
+        ...(subscription.upstreamPayPalStatus
+          ? {
+              upstreamPayPalStatus: sanitizeString(subscription.upstreamPayPalStatus, 64, 'ACTIVE'),
+            }
+          : {}),
+        cancelAtPeriodEnd: Boolean(subscription.cancelAtPeriodEnd),
+        updatedAt: serverTimestamp(),
+      };
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data();
+        if (existingData?.createdAt) {
+          payload.createdAt = existingData.createdAt;
+        }
+        tx.set(subRef, payload, { merge: false });
+      } else {
+        tx.set(subRef, {
+          ...payload,
+          createdAt: serverTimestamp(),
+        });
+      }
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function syncUserUsageQuotaToFirestoreAtomic(
+  uid: string,
+  quota: {
+    periodId?: string;
+    periodStart: string;
+    periodEnd: string;
+    searchesUsed: number;
+    comparisonsUsed: number;
+    checkoutsUsed: number;
+    CsvExportsUsed: number;
+    agentTokensUsed: number;
+    estimatedCostUsd: number;
+    activeReservationsCount?: number;
+    revision: number;
+  }
+): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== uid) return;
+  const rawPeriodId =
+    quota.periodId ||
+    `period-${String(quota.periodStart || new Date().toISOString()).slice(0, 7)}`;
+  const safePeriodId = rawPeriodId.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 64) || 'period-current';
+  const path = `users/${uid}/usage_quotas/${safePeriodId}`;
+  const quotaRef = doc(db, 'users', uid, 'usage_quotas', safePeriodId);
+  try {
+    await runTransaction(db, async (tx) => {
+      const existingSnap = await tx.get(quotaRef);
+      const existingData = existingSnap.exists() ? existingSnap.data() : null;
+      const existingRevision =
+        existingData && typeof existingData.revision === 'number' ? existingData.revision : 0;
+      const nextRevision = Math.max(
+        existingRevision + 1,
+        Math.max(1, Math.round(Number(quota.revision) || 1))
+      );
+
+      const payload = {
+        userId: uid,
+        periodId: safePeriodId,
+        periodStart: sanitizeString(quota.periodStart, 64, new Date().toISOString()),
+        periodEnd: sanitizeString(quota.periodEnd, 64, new Date().toISOString()),
+        searchesUsed: Math.max(
+          existingData && typeof existingData.searchesUsed === 'number' ? existingData.searchesUsed : 0,
+          Math.max(0, Math.round(Number(quota.searchesUsed) || 0))
+        ),
+        comparisonsUsed: Math.max(
+          existingData && typeof existingData.comparisonsUsed === 'number'
+            ? existingData.comparisonsUsed
+            : 0,
+          Math.max(0, Math.round(Number(quota.comparisonsUsed) || 0))
+        ),
+        checkoutsUsed: Math.max(
+          existingData && typeof existingData.checkoutsUsed === 'number' ? existingData.checkoutsUsed : 0,
+          Math.max(0, Math.round(Number(quota.checkoutsUsed) || 0))
+        ),
+        CsvExportsUsed: Math.max(
+          existingData && typeof existingData.CsvExportsUsed === 'number'
+            ? existingData.CsvExportsUsed
+            : 0,
+          Math.max(0, Math.round(Number(quota.CsvExportsUsed) || 0))
+        ),
+        agentTokensUsed: Math.max(
+          existingData && typeof existingData.agentTokensUsed === 'number'
+            ? existingData.agentTokensUsed
+            : 0,
+          Math.max(0, Math.round(Number(quota.agentTokensUsed) || 0))
+        ),
+        estimatedCostUsd: Math.max(0, Number(quota.estimatedCostUsd) || 0),
+        activeReservationsCount: Math.max(0, Math.round(Number(quota.activeReservationsCount) || 0)),
+        revision: nextRevision,
+        updatedAt: serverTimestamp(),
+      };
+      tx.set(quotaRef, payload);
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function persistSubscriptionPaymentToFirestore(
+  uid: string,
+  payment: {
+    paymentId: string;
+    subscriptionId: string;
+    planId: 'free' | 'luna' | 'terra' | 'sol';
+    amountUsd: number;
+    currency: 'USD';
+    status: 'COMPLETED' | 'REFUNDED' | 'FAILED' | 'PENDING_APPROVAL';
+    settlementMode: 'PAYPAL_UPSTREAM_CAPTURED' | 'SANDBOX_WALLET_SIMULATION' | 'FREE_TIER_NO_CHARGE';
+    paypalOrderId: string;
+    paypalCaptureId: string;
+    billingPeriod: 'monthly' | 'annual';
+    description: string;
+  }
+): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== uid) return;
+  const safeId = payment.paymentId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+  const path = `users/${uid}/subscription_payments/${safeId}`;
+  const payRef = doc(db, 'users', uid, 'subscription_payments', safeId);
+  try {
+    await runTransaction(db, async (tx) => {
+      const existingSnap = await tx.get(payRef);
+      if (existingSnap.exists()) return;
+      tx.set(payRef, {
+        paymentId: safeId,
+        subscriptionId: sanitizeString(payment.subscriptionId, 128, 'I-SPARK'),
+        userId: uid,
+        planId: payment.planId,
+        amountUsd: Math.max(0, Number(payment.amountUsd) || 0),
+        currency: 'USD',
+        status: payment.status,
+        settlementMode: payment.settlementMode,
+        paypalOrderId: sanitizeString(payment.paypalOrderId, 128, 'ORD-SPARK'),
+        paypalCaptureId: sanitizeString(payment.paypalCaptureId, 128, 'CAP-SPARK'),
+        billingPeriod: payment.billingPeriod,
+        description: sanitizeString(payment.description, 512, 'Spark subscription payment'),
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
-    }
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -1629,3 +1777,4 @@ export async function fetchUserSearchHistoryFromFirestore(
     return [];
   }
 }
+

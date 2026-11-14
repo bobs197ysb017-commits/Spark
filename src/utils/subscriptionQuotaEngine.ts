@@ -1,641 +1,930 @@
-import {
+import type {
+  AgGridWorkspaceView,
   SubscriptionPaymentRecord,
   SubscriptionPlanId,
   SubscriptionQuotaStatus,
+  SubscriptionStatus,
   SubscriptionTierConfig,
   UserSubscriptionRecord,
   UserUsageQuotaRecord,
-} from '../types/spark';
+} from '../types/spark.ts';
 
-// ============================================================================
-// 1. SUBSCRIPTION PLANS SPECIFICATION (LUNA, TERRA, SOL, FREE)
-// ============================================================================
+export type QuotaFeatureType = 'search' | 'analysis' | 'coupon' | 'workflow';
 
+export type SubscriptionSettlementMode =
+  | 'PAYPAL_UPSTREAM_CAPTURED'
+  | 'SANDBOX_WALLET_SIMULATION'
+  | 'FREE_TIER_NO_CHARGE';
+
+export interface ActiveQuotaReservation {
+  reservationId: string;
+  userId: string;
+  feature: QuotaFeatureType;
+  operationId?: string;
+  status: 'RESERVED' | 'COMMITTED' | 'RELEASED';
+  createdAt: string;
+  committedAt?: string;
+  releasedAt?: string;
+}
+
+export interface ExtendedUserUsageQuotaRecord extends UserUsageQuotaRecord {
+  revision: number;
+  activeReservationsCount: number;
+}
+
+export interface ExtendedSubscriptionPaymentRecord extends SubscriptionPaymentRecord {
+  settlementMode?: SubscriptionSettlementMode;
+  upstreamPayPalStatus?: string;
+  paypalOrderId?: string;
+  paypalCaptureId?: string;
+}
+
+export interface FirestoreTransactionalQuotaAdapter {
+  onSubscriptionCommitted?: (record: UserSubscriptionRecord) => void | Promise<void>;
+  onUsageQuotaCommitted?: (record: ExtendedUserUsageQuotaRecord) => void | Promise<void>;
+  onPaymentCommitted?: (record: ExtendedSubscriptionPaymentRecord) => void | Promise<void>;
+}
+
+/**
+ * Spark Commercial Subscription Tiers:
+ * - Free: Entry-level exploration (3 workflows/mo, 15 searches/mo)
+ * - Luna ($9.99/mo): Fast personal shopping intelligence
+ * - Terra ($19.99/mo): Balanced multi-source intelligence & comparisons
+ * - Sol ($39.99/mo): Deep autonomous research & high concurrency
+ */
 export const SPARK_SUBSCRIPTION_PLANS: Record<SubscriptionPlanId, SubscriptionTierConfig> = {
   free: {
     id: 'free',
-    name: 'Free Trial',
-    tagline: 'Basic catalog exploration for occasional shoppers',
+    name: 'Spark Free',
+    tagline: 'Essential verified product search & basic price discovery',
     priceMonthly: 0,
     currency: 'USD',
     modelTier: 'fast',
-    preferredModel: 'Standard Catalog Engine',
+    preferredModel: 'gemini-3-flash-preview',
     monthlySearches: 15,
     monthlyAnalyses: 5,
-    monthlyCoupons: 10,
+    monthlyCoupons: 5,
     monthlyWorkflows: 3,
     maxConcurrency: 1,
-    description: 'Entry-level exploration with live price verification and source attribution.',
+    description:
+      'Explore live Channel3 catalog offers and basic product comparisons with strict anti-fabrication guarantees.',
     features: [
-      '15 verified product searches/mo',
-      '5 deep product analyses/mo',
-      '10 verified coupon checks/mo',
-      '3 comparison workflows/mo',
-      '1 concurrent search execution',
-      'Standard community support',
+      '15 Live Channel3 Product Searches / month',
+      '5 Multi-Product Evidence Comparisons / month',
+      '5 Live Coupon Verifications / month',
+      '3 Full 7-Agent Orchestration Workflows / month',
+      '1 Concurrent Search Session',
     ],
-    badgeColor: 'bg-zinc-800 text-zinc-300 border-zinc-700',
-    isPopular: false,
+    badgeColor: 'slate',
   },
   luna: {
     id: 'luna',
-    name: 'LUNA — Essential Catalog',
-    tagline: 'Streamlined product search & coupon discovery for active buyers',
+    name: 'Luna Plan',
+    tagline: 'Fast everyday AI shopping assistant & coupon hunter',
     priceMonthly: 9.99,
     currency: 'USD',
     modelTier: 'fast',
-    preferredModel: 'Luna High-Speed Search Engine',
+    preferredModel: 'gemini-3-flash-preview',
     monthlySearches: 120,
     monthlyAnalyses: 30,
     monthlyCoupons: 40,
     monthlyWorkflows: 20,
     maxConcurrency: 1,
-    description: 'Essential real-time catalog discovery for individuals shopping across multiple merchants.',
+    description:
+      'Designed for active shoppers who want fast, verified product recommendations and automatic coupon discovery.',
     features: [
-      '120 verified product searches/mo',
-      '30 deep ingredient & spec analyses/mo',
-      '40 verified coupon checks/mo',
-      '20 comparison workflows/mo',
-      '1 concurrent search execution',
-      'Channel3 Product Graph enrichment',
-      'Tabular analytics workspace',
-      'PayPal buyer protection integration',
+      '120 Live Channel3 Product Searches / month',
+      '30 Deep Product Spec Analyses / month',
+      '40 Feedico & Merchant Coupon Verifications / month',
+      '20 Full 7-Agent Orchestration Workflows / month',
+      'AG Grid Interactive Product & Savings Workspace',
+      '1 Concurrent Search Session',
     ],
-    badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-    isPopular: false,
+    badgeColor: 'cyan',
   },
   terra: {
     id: 'terra',
-    name: 'TERRA — Advanced Catalog',
-    tagline: 'Multi-merchant comparison for power shoppers & analysts',
+    name: 'Terra Plan',
+    tagline: 'Balanced deep comparison & Omega Decision Crucible',
     priceMonthly: 19.99,
     currency: 'USD',
     modelTier: 'balanced',
-    preferredModel: 'Terra Multi-Merchant Search Engine',
+    preferredModel: 'gemini-3-flash-preview',
     monthlySearches: 600,
     monthlyAnalyses: 150,
     monthlyCoupons: 200,
     monthlyWorkflows: 100,
     maxConcurrency: 3,
-    description: 'Comprehensive product discovery suite with high-volume search and parallel comparisons.',
+    description:
+      'Our most popular tier for power buyers requiring side-by-side decision matrices, scientific compound checks, and high quota limits.',
     features: [
-      '600 verified product searches/mo',
-      '150 deep ingredient & spec analyses/mo',
-      '200 verified coupon checks/mo',
-      '100 comparison workflows/mo',
-      '3 concurrent search executions',
-      'Multi-merchant price comparison',
-      'Full tabular analytics with CSV exports',
-      'Priority price freshness monitoring',
-      'Dedicated sandbox validation suite',
+      '600 Live Channel3 Product Searches / month',
+      '150 Omega Decision Crucible Comparisons / month',
+      '200 Verified Coupon & Deal Lookups / month',
+      '100 Full 7-Agent Orchestration Workflows / month',
+      'Full AG Grid Analytics & CSV Export',
+      'Up to 3 Concurrent Agent Workflows',
     ],
-    badgeColor: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
+    badgeColor: 'violet',
     isPopular: true,
   },
   sol: {
     id: 'sol',
-    name: 'SOL — Enterprise Catalog',
-    tagline: 'Maximum catalog capacity with deep comparison & maximum concurrency',
+    name: 'Sol Plan',
+    tagline: 'Maximum autonomous intelligence, priority reasoning & enterprise scale',
     priceMonthly: 39.99,
     currency: 'USD',
     modelTier: 'deep',
-    preferredModel: 'Sol Enterprise Catalog Engine',
+    preferredModel: 'gemini-3.1-pro-preview',
     monthlySearches: 2500,
     monthlyAnalyses: 700,
     monthlyCoupons: 1000,
     monthlyWorkflows: 350,
     maxConcurrency: 5,
-    description: 'Enterprise-grade product catalog access for high-frequency purchasing, research, and bulk comparisons.',
+    description:
+      'Uncompromising product intelligence powered by deep reasoning models, maximum monthly quotas, and 5x concurrent execution.',
     features: [
-      '2,500 verified product searches/mo',
-      '700 deep ingredient & spec analyses/mo',
-      '1,000 verified coupon checks/mo',
-      '350 comparison workflows/mo',
-      '5 concurrent search executions',
-      'Bulk multi-merchant catalog comparison',
-      'Unlimited tabular analytics views & matrix pivots',
-      'Fastest API latency routing',
-      'VIP priority execution queue',
+      '2,500 Live Channel3 Product Searches / month',
+      '700 Deep Reasoning Product & Science Analyses / month',
+      '1,000 Verified Coupon & Affiliate Audits / month',
+      '350 Full 7-Agent Orchestration Workflows / month',
+      'Unlimited AG Grid Workspace Views & Ledger Exports',
+      'Up to 5 Concurrent Agent Workflows',
     ],
-    badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-    isPopular: false,
+    badgeColor: 'amber',
   },
 };
 
-// ============================================================================
-// 2. IN-MEMORY RUNTIME STATE & QUOTA ENGINE
-// ============================================================================
+export const SUBSCRIPTION_PLANS = SPARK_SUBSCRIPTION_PLANS;
 
-const subscriptionsByUser = new Map<string, UserSubscriptionRecord>();
-const usageRecordsByUserMonth = new Map<string, UserUsageQuotaRecord>();
-const activeConcurrencyByUser = new Map<string, number>();
-const subscriptionPayments: SubscriptionPaymentRecord[] = [];
+function getCurrentBillingPeriodMonth(): string {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
 
-/**
- * Returns current billing period key, e.g. "2026-11".
- */
-export function getCurrentBillingPeriod(date: Date = new Date()): string {
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+function getNextMonthResetIso(): string {
+  const now = new Date();
+  const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0));
+  return nextMonth.toISOString();
+}
+
+// Transactional stores with optimistic concurrency revisions (`revision`)
+const subscriptionsByUserId = new Map<string, UserSubscriptionRecord>();
+const usageByUserId = new Map<string, ExtendedUserUsageQuotaRecord>();
+const paymentsByUserId = new Map<string, ExtendedSubscriptionPaymentRecord[]>();
+const activeConcurrencyByUserId = new Map<string, number>();
+const processedUsageOperations = new Set<string>();
+const reservationsById = new Map<string, ActiveQuotaReservation>();
+const pendingReservationQueueByUserFeature = new Map<string, string[]>();
+const firestoreAdapters = new Set<FirestoreTransactionalQuotaAdapter>();
+
+export interface UserDashboardPreferences {
+  userId: string;
+  defaultTab: AgGridWorkspaceView;
+  pageSize: number;
+  quickFilterDefault: string;
+  updatedAt: string;
+}
+
+const dashboardPrefsByUserId = new Map<string, UserDashboardPreferences>();
+
+export function registerFirestoreQuotaAdapter(
+  adapter: FirestoreTransactionalQuotaAdapter
+): () => void {
+  firestoreAdapters.add(adapter);
+  return () => {
+    firestoreAdapters.delete(adapter);
+  };
+}
+
+function notifySubscriptionCommitted(record: UserSubscriptionRecord): void {
+  for (const adapter of firestoreAdapters) {
+    try {
+      void adapter.onSubscriptionCommitted?.({ ...record });
+    } catch {
+      // Non-blocking listener notification
+    }
+  }
+}
+
+function notifyUsageQuotaCommitted(record: ExtendedUserUsageQuotaRecord): void {
+  for (const adapter of firestoreAdapters) {
+    try {
+      void adapter.onUsageQuotaCommitted?.({ ...record });
+    } catch {
+      // Non-blocking listener notification
+    }
+  }
+}
+
+function notifyPaymentCommitted(record: ExtendedSubscriptionPaymentRecord): void {
+  for (const adapter of firestoreAdapters) {
+    try {
+      void adapter.onPaymentCommitted?.({ ...record });
+    } catch {
+      // Non-blocking listener notification
+    }
+  }
 }
 
 /**
- * Formats standard next reset date for the end of the current UTC calendar month.
+ * Executes a synchronous atomic state transaction on a user's subscription and usage quota
+ * with automatic monotonic revision increment and rollback on thrown errors.
  */
-export function getBillingPeriodResetDate(date: Date = new Date()): string {
-  const y = date.getUTCFullYear();
-  const m = date.getUTCMonth();
-  const nextMonthFirst = new Date(Date.UTC(y, m + 1, 1, 0, 0, 0));
-  return nextMonthFirst.toISOString();
+export function runAtomicQuotaTransaction<T>(
+  userId: string,
+  mutator: (ctx: {
+    subscription: UserSubscriptionRecord;
+    usage: ExtendedUserUsageQuotaRecord;
+    plan: SubscriptionTierConfig;
+  }) => T
+): T {
+  const cleanUserId = String(userId || 'anonymous').trim() || 'anonymous';
+  const subSnapshot = { ...getUserSubscription(cleanUserId) };
+  const usageSnapshot = { ...getUserUsageRecord(cleanUserId) };
+  const effectivePlanId: SubscriptionPlanId =
+    subSnapshot.status === 'active' || subSnapshot.status === 'trialing'
+      ? subSnapshot.planId
+      : 'free';
+  const plan = SPARK_SUBSCRIPTION_PLANS[effectivePlanId] || SPARK_SUBSCRIPTION_PLANS.free;
+
+  try {
+    const result = mutator({
+      subscription: subSnapshot,
+      usage: usageSnapshot,
+      plan,
+    });
+    usageSnapshot.revision = Math.max(1, (usageSnapshot.revision || 1) + 1);
+    usageSnapshot.updatedAt = new Date().toISOString();
+    subscriptionsByUserId.set(cleanUserId, subSnapshot);
+    usageByUserId.set(cleanUserId, usageSnapshot);
+    notifySubscriptionCommitted(subSnapshot);
+    notifyUsageQuotaCommitted(usageSnapshot);
+    return result;
+  } catch (err) {
+    // Roll back on any error inside the transaction
+    throw err;
+  }
 }
 
-/**
- * Retrieve or initialize user subscription record.
- */
+export function getUserDashboardPreferences(userId: string): UserDashboardPreferences {
+  const existing = dashboardPrefsByUserId.get(userId);
+  if (existing) return existing;
+  const fallback: UserDashboardPreferences = {
+    userId,
+    defaultTab: 'saved_products',
+    pageSize: 10,
+    quickFilterDefault: '',
+    updatedAt: new Date().toISOString(),
+  };
+  dashboardPrefsByUserId.set(userId, fallback);
+  return fallback;
+}
+
+export function saveUserDashboardPreferences(
+  userId: string,
+  patch: Partial<Pick<UserDashboardPreferences, 'defaultTab' | 'pageSize' | 'quickFilterDefault'>>
+): UserDashboardPreferences {
+  const current = getUserDashboardPreferences(userId);
+  const validTabs: AgGridWorkspaceView[] = [
+    'saved_products',
+    'comparison_matrix',
+    'purchase_ledger',
+    'coupon_savings',
+    'quota_usage',
+  ];
+  const updated: UserDashboardPreferences = {
+    userId,
+    defaultTab:
+      patch.defaultTab && validTabs.includes(patch.defaultTab)
+        ? patch.defaultTab
+        : current.defaultTab,
+    pageSize:
+      typeof patch.pageSize === 'number' && [10, 25, 50].includes(patch.pageSize)
+        ? patch.pageSize
+        : current.pageSize,
+    quickFilterDefault:
+      typeof patch.quickFilterDefault === 'string'
+        ? patch.quickFilterDefault.slice(0, 120)
+        : current.quickFilterDefault,
+    updatedAt: new Date().toISOString(),
+  };
+  dashboardPrefsByUserId.set(userId, updated);
+  return updated;
+}
+
 export function getUserSubscription(userId: string): UserSubscriptionRecord {
-  const cleanId = (userId || 'anonymous').trim();
-  let sub = subscriptionsByUser.get(cleanId);
-  if (!sub) {
-    const now = new Date();
-    const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-    const periodEnd = getBillingPeriodResetDate(now);
-    sub = {
-      id: `sub_${cleanId}_${Date.now()}`,
-      userId: cleanId,
-      planId: 'free',
-      status: 'active',
-      currentPeriodStart: periodStart,
-      currentPeriodEnd: periodEnd,
-      cancelAtPeriodEnd: false,
-      paypalSubscriptionId: null,
-      paypalPlanId: null,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    };
-    subscriptionsByUser.set(cleanId, sub);
-    return sub;
+  const existing = subscriptionsByUserId.get(userId);
+  if (existing) {
+    // Check if period ended for cancelled or past_due subscriptions
+    if (
+      (existing.status === 'cancelled' || existing.cancelAtPeriodEnd) &&
+      new Date(existing.currentPeriodEnd).getTime() <= Date.now()
+    ) {
+      existing.status = 'expired';
+      existing.planId = 'free';
+      existing.cancelAtPeriodEnd = false;
+      existing.updatedAt = new Date().toISOString();
+      subscriptionsByUserId.set(userId, existing);
+      notifySubscriptionCommitted(existing);
+    }
+    return existing;
   }
 
-  // Automatically expire paid or cancelled-at-period-end subscriptions once period end elapses
-  if (sub.planId !== 'free' && sub.currentPeriodEnd) {
-    const endMs = Date.parse(sub.currentPeriodEnd);
-    if (Number.isFinite(endMs) && endMs <= Date.now()) {
-      return expireSubscription(cleanId);
+  const now = new Date().toISOString();
+  const defaultSub: UserSubscriptionRecord = {
+    id: `sub_free_${userId.slice(0, 16)}`,
+    userId,
+    planId: 'free',
+    status: 'active',
+    currentPeriodStart: now,
+    currentPeriodEnd: getNextMonthResetIso(),
+    cancelAtPeriodEnd: false,
+    paypalSubscriptionId: null,
+    paypalPlanId: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  subscriptionsByUserId.set(userId, defaultSub);
+  return defaultSub;
+}
+
+export function getUserUsageRecord(userId: string): ExtendedUserUsageQuotaRecord {
+  const currentMonth = getCurrentBillingPeriodMonth();
+  const sub = getUserSubscription(userId);
+  const existing = usageByUserId.get(userId);
+  const activeCount = activeConcurrencyByUserId.get(userId) || 0;
+
+  if (existing && existing.billingPeriodMonth === currentMonth) {
+    existing.planId = sub.status === 'active' || sub.status === 'trialing' ? sub.planId : 'free';
+    existing.activeWorkflowsCount = activeCount;
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  const fresh: ExtendedUserUsageQuotaRecord = {
+    userId,
+    planId: sub.status === 'active' || sub.status === 'trialing' ? sub.planId : 'free',
+    billingPeriodMonth: currentMonth,
+    searchesUsed: 0,
+    analysesUsed: 0,
+    couponsUsed: 0,
+    workflowsUsed: 0,
+    activeWorkflowsCount: activeCount,
+    totalTokensEstimated: 0,
+    totalEstimatedCostUsd: 0,
+    lastResetAt: now,
+    updatedAt: now,
+    revision: existing ? (existing.revision || 1) + 1 : 1,
+    activeReservationsCount: 0,
+  };
+  usageByUserId.set(userId, fresh);
+  return fresh;
+}
+
+export function resetUserMonthlyQuota(
+  userId: string,
+  overrideMonth?: string
+): ExtendedUserUsageQuotaRecord {
+  const sub = getUserSubscription(userId);
+  const now = new Date().toISOString();
+  const previous = usageByUserId.get(userId);
+
+  // Clear any pending reservations for this user
+  for (const [resId, resEntry] of Array.from(reservationsById.entries())) {
+    if (resEntry.userId === userId) {
+      reservationsById.delete(resId);
+    }
+  }
+  for (const key of Array.from(pendingReservationQueueByUserFeature.keys())) {
+    if (key.startsWith(`${userId}:`)) {
+      pendingReservationQueueByUserFeature.delete(key);
     }
   }
 
-  return sub;
+  const fresh: ExtendedUserUsageQuotaRecord = {
+    userId,
+    planId: sub.status === 'active' || sub.status === 'trialing' ? sub.planId : 'free',
+    billingPeriodMonth: overrideMonth || getCurrentBillingPeriodMonth(),
+    searchesUsed: 0,
+    analysesUsed: 0,
+    couponsUsed: 0,
+    workflowsUsed: 0,
+    activeWorkflowsCount: activeConcurrencyByUserId.get(userId) || 0,
+    totalTokensEstimated: 0,
+    totalEstimatedCostUsd: 0,
+    lastResetAt: now,
+    updatedAt: now,
+    revision: previous ? (previous.revision || 1) + 1 : 1,
+    activeReservationsCount: 0,
+  };
+  usageByUserId.set(userId, fresh);
+  notifyUsageQuotaCommitted(fresh);
+  return fresh;
 }
 
-/**
- * Retrieve or initialize usage record for the user's active billing month.
- */
-export function getUserUsageRecord(userId: string): UserUsageQuotaRecord {
-  const cleanId = (userId || 'anonymous').trim();
-  const period = getCurrentBillingPeriod();
-  const key = `${cleanId}:${period}`;
-
-  let record = usageRecordsByUserMonth.get(key);
-  if (!record) {
-    const sub = getUserSubscription(cleanId);
-    record = {
-      userId: cleanId,
-      planId: sub.planId,
-      billingPeriodMonth: period,
-      searchesUsed: 0,
-      analysesUsed: 0,
-      couponsUsed: 0,
-      workflowsUsed: 0,
-      activeWorkflowsCount: activeConcurrencyByUser.get(cleanId) || 0,
-      totalTokensEstimated: 0,
-      totalEstimatedCostUsd: 0,
-      lastResetAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    usageRecordsByUserMonth.set(key, record);
-  } else {
-    record.activeWorkflowsCount = activeConcurrencyByUser.get(cleanId) || 0;
-  }
-  return record;
-}
-
-/**
- * Get unified quota status with plan limits and remaining balance.
- */
 export function getUserQuotaStatus(userId: string): SubscriptionQuotaStatus {
-  const sub = getUserSubscription(userId);
-  const plan = SPARK_SUBSCRIPTION_PLANS[sub.planId] || SPARK_SUBSCRIPTION_PLANS.free;
+  const subscription = getUserSubscription(userId);
+  const effectivePlanId: SubscriptionPlanId =
+    subscription.status === 'active' || subscription.status === 'trialing'
+      ? subscription.planId
+      : 'free';
+  const plan = SPARK_SUBSCRIPTION_PLANS[effectivePlanId] || SPARK_SUBSCRIPTION_PLANS.free;
   const usage = getUserUsageRecord(userId);
-  const activeConcurrency = activeConcurrencyByUser.get(userId) || 0;
 
-  const remainingSearches = Math.max(0, plan.monthlySearches - usage.searchesUsed);
-  const remainingAnalyses = Math.max(0, plan.monthlyAnalyses - usage.analysesUsed);
-  const remainingCoupons = Math.max(0, plan.monthlyCoupons - usage.couponsUsed);
-  const remainingWorkflows = Math.max(0, plan.monthlyWorkflows - usage.workflowsUsed);
-  const remainingConcurrency = Math.max(0, plan.maxConcurrency - activeConcurrency);
+  const limits = {
+    searches: plan.monthlySearches,
+    analyses: plan.monthlyAnalyses,
+    coupons: plan.monthlyCoupons,
+    workflows: plan.monthlyWorkflows,
+    concurrency: plan.maxConcurrency,
+  };
+
+  const remaining = {
+    searches: Math.max(0, limits.searches - usage.searchesUsed),
+    analyses: Math.max(0, limits.analyses - usage.analysesUsed),
+    coupons: Math.max(0, limits.coupons - usage.couponsUsed),
+    workflows: Math.max(0, limits.workflows - usage.workflowsUsed),
+    concurrency: Math.max(0, limits.concurrency - usage.activeWorkflowsCount),
+  };
 
   return {
     plan,
-    subscription: sub,
-    usage: {
-      ...usage,
-      activeWorkflowsCount: activeConcurrency,
-    },
-    limits: {
-      searches: plan.monthlySearches,
-      analyses: plan.monthlyAnalyses,
-      coupons: plan.monthlyCoupons,
-      workflows: plan.monthlyWorkflows,
-      concurrency: plan.maxConcurrency,
-    },
-    remaining: {
-      searches: remainingSearches,
-      analyses: remainingAnalyses,
-      coupons: remainingCoupons,
-      workflows: remainingWorkflows,
-      concurrency: remainingConcurrency,
-    },
-    periodResetDate: sub.currentPeriodEnd || getBillingPeriodResetDate(),
+    subscription,
+    usage,
+    limits,
+    remaining,
+    periodResetDate: getNextMonthResetIso(),
   };
 }
 
+function getFeatureUsageAndLimit(
+  usage: ExtendedUserUsageQuotaRecord,
+  plan: SubscriptionTierConfig,
+  feature: QuotaFeatureType
+): { used: number; limit: number; label: string } {
+  switch (feature) {
+    case 'search':
+      return {
+        used: usage.searchesUsed,
+        limit: plan.monthlySearches,
+        label: 'monthly product searches',
+      };
+    case 'analysis':
+      return {
+        used: usage.analysesUsed,
+        limit: plan.monthlyAnalyses,
+        label: 'monthly deep analyses',
+      };
+    case 'coupon':
+      return {
+        used: usage.couponsUsed,
+        limit: plan.monthlyCoupons,
+        label: 'monthly coupon verifications',
+      };
+    case 'workflow':
+      return {
+        used: usage.workflowsUsed,
+        limit: plan.monthlyWorkflows,
+        label: 'monthly 7-agent workflows',
+      };
+  }
+}
+
+function mutateFeatureCounter(
+  usage: ExtendedUserUsageQuotaRecord,
+  feature: QuotaFeatureType,
+  delta: 1 | -1
+): void {
+  switch (feature) {
+    case 'search':
+      usage.searchesUsed = Math.max(0, usage.searchesUsed + delta);
+      break;
+    case 'analysis':
+      usage.analysesUsed = Math.max(0, usage.analysesUsed + delta);
+      break;
+    case 'coupon':
+      usage.couponsUsed = Math.max(0, usage.couponsUsed + delta);
+      break;
+    case 'workflow':
+      usage.workflowsUsed = Math.max(0, usage.workflowsUsed + delta);
+      break;
+  }
+}
+
 /**
- * Atomically checks and reserves quota before executing an action.
+ * Atomically checks AND reserves 1 quota unit for `feature` immediately inside an atomic
+ * revision-locked transaction.
+ *
+ * Because the counter is incremented at reservation time (before async work runs), concurrent
+ * requests can never pass the check simultaneously and overrun the user's plan limit.
+ *
+ * - When the downstream operation succeeds, `recordFeatureUsage` commits the pending reservation
+ *   (adding token/cost telemetry without incrementing the counter a second time).
+ * - If the downstream operation aborts/fails, `releaseFeatureQuotaReservation` (or `releaseConcurrency`
+ *   when a workflow fails before completion) rolls back the reserved counter.
  */
 export function reserveFeatureQuota(
   userId: string,
-  feature: 'search' | 'analysis' | 'coupon' | 'workflow'
-): { allowed: boolean; remaining: number; limit: number; error?: string } {
-  const status = getUserQuotaStatus(userId);
-  let used = 0;
-  let limit = 0;
-
-  switch (feature) {
-    case 'search':
-      used = status.usage.searchesUsed;
-      limit = status.limits.searches;
-      break;
-    case 'analysis':
-      used = status.usage.analysesUsed;
-      limit = status.limits.analyses;
-      break;
-    case 'coupon':
-      used = status.usage.couponsUsed;
-      limit = status.limits.coupons;
-      break;
-    case 'workflow':
-      used = status.usage.workflowsUsed;
-      limit = status.limits.workflows;
-      break;
+  feature: QuotaFeatureType,
+  operationId?: string
+): {
+  allowed: boolean;
+  remaining: number;
+  limit: number;
+  error?: string;
+  reservationId?: string;
+  revision?: number;
+} {
+  const cleanOpKey = operationId ? `${userId}:${feature}:${operationId.trim()}` : '';
+  if (cleanOpKey && reservationsById.has(cleanOpKey)) {
+    const existing = reservationsById.get(cleanOpKey)!;
+    if (existing.status !== 'RELEASED') {
+      const status = getUserQuotaStatus(userId);
+      const { used, limit } = getFeatureUsageAndLimit(
+        status.usage as ExtendedUserUsageQuotaRecord,
+        status.plan,
+        feature
+      );
+      return {
+        allowed: true,
+        remaining: Math.max(0, limit - used),
+        limit,
+        reservationId: existing.reservationId,
+        revision: (status.usage as ExtendedUserUsageQuotaRecord).revision,
+      };
+    }
   }
 
-  if (used >= limit) {
-    return {
-      allowed: false,
-      remaining: 0,
-      limit,
-      error: `Monthly quota exceeded for ${feature}s (${used}/${limit}). Upgrade your plan (Luna, Terra, Sol) to increase limits.`,
+  return runAtomicQuotaTransaction(userId, ({ usage, plan }) => {
+    const { used, limit, label } = getFeatureUsageAndLimit(usage, plan, feature);
+    if (used >= limit) {
+      return {
+        allowed: false,
+        remaining: 0,
+        limit,
+        error: `You have reached your ${plan.name} limit of ${limit} ${label} for this billing period. Upgrade to Luna, Terra, or Sol to continue.`,
+      };
+    }
+
+    // Atomically increment the feature counter on reservation so concurrent calls cannot overrun
+    mutateFeatureCounter(usage, feature, 1);
+    usage.activeReservationsCount = Math.max(0, (usage.activeReservationsCount || 0) + 1);
+
+    const reservationId =
+      cleanOpKey ||
+      `res_${userId}_${feature}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+    const reservation: ActiveQuotaReservation = {
+      reservationId,
+      userId,
+      feature,
+      operationId,
+      status: 'RESERVED',
+      createdAt: new Date().toISOString(),
     };
-  }
+    reservationsById.set(reservationId, reservation);
 
-  return {
-    allowed: true,
-    remaining: limit - used,
-    limit,
-  };
+    const queueKey = `${userId}:${feature}`;
+    const queue = pendingReservationQueueByUserFeature.get(queueKey) || [];
+    queue.push(reservationId);
+    pendingReservationQueueByUserFeature.set(queueKey, queue);
+
+    const afterUsed = used + 1;
+    return {
+      allowed: true,
+      remaining: Math.max(0, limit - afterUsed),
+      limit,
+      reservationId,
+      revision: (usage.revision || 1) + 1,
+    };
+  });
 }
 
 /**
- * Concurrency Limiter: Acquire execution slot for an agent workflow.
+ * Atomically releases an uncommitted quota reservation if a workflow or operation fails before completion.
  */
+export function releaseFeatureQuotaReservation(
+  userId: string,
+  feature: QuotaFeatureType,
+  reservationId?: string
+): ExtendedUserUsageQuotaRecord {
+  return runAtomicQuotaTransaction(userId, ({ usage }) => {
+    const queueKey = `${userId}:${feature}`;
+    const queue = pendingReservationQueueByUserFeature.get(queueKey) || [];
+
+    let targetId = reservationId;
+    if (targetId && !reservationsById.has(targetId)) {
+      const prefixed = `${userId}:${feature}:${targetId.trim()}`;
+      if (reservationsById.has(prefixed)) {
+        targetId = prefixed;
+      }
+    }
+    if (!targetId && queue.length > 0) {
+      targetId = queue[queue.length - 1];
+    }
+
+    if (!targetId) {
+      return usage;
+    }
+
+    const entry = reservationsById.get(targetId);
+    if (!entry || entry.userId !== userId || entry.status !== 'RESERVED') {
+      return usage;
+    }
+
+    entry.status = 'RELEASED';
+    entry.releasedAt = new Date().toISOString();
+    reservationsById.set(targetId, entry);
+
+    const nextQueue = queue.filter((id) => id !== targetId);
+    pendingReservationQueueByUserFeature.set(queueKey, nextQueue);
+
+    mutateFeatureCounter(usage, feature, -1);
+    usage.activeReservationsCount = Math.max(0, (usage.activeReservationsCount || 1) - 1);
+    return usage;
+  });
+}
+
+/**
+ * Atomically commits feature usage (or increments if no prior reservation exists for this operation)
+ * with idempotency protection via `operationId`.
+ */
+export function recordFeatureUsage(
+  userId: string,
+  feature: QuotaFeatureType,
+  estimatedTokens = 0,
+  estimatedCostUsd = 0,
+  operationId?: string
+): ExtendedUserUsageQuotaRecord {
+  if (operationId) {
+    const dedupeKey = `${userId}:${feature}:${operationId}`;
+    if (processedUsageOperations.has(dedupeKey)) {
+      return getUserUsageRecord(userId);
+    }
+    processedUsageOperations.add(dedupeKey);
+  }
+
+  return runAtomicQuotaTransaction(userId, ({ usage, plan }) => {
+    const queueKey = `${userId}:${feature}`;
+    const queue = pendingReservationQueueByUserFeature.get(queueKey) || [];
+
+    // Match explicit operationId reservation first, or FIFO pending reservation for this user+feature
+    let matchedReservation: ActiveQuotaReservation | undefined;
+    if (operationId) {
+      const opKey = `${userId}:${feature}:${operationId.trim()}`;
+      const byOp = reservationsById.get(opKey) || reservationsById.get(operationId.trim());
+      if (byOp && byOp.userId === userId && byOp.feature === feature && byOp.status === 'RESERVED') {
+        matchedReservation = byOp;
+      }
+    }
+    if (!matchedReservation && queue.length > 0) {
+      while (queue.length > 0) {
+        const candidateId = queue.shift()!;
+        const candidate = reservationsById.get(candidateId);
+        if (
+          candidate &&
+          candidate.userId === userId &&
+          candidate.feature === feature &&
+          candidate.status === 'RESERVED'
+        ) {
+          matchedReservation = candidate;
+          break;
+        }
+      }
+      pendingReservationQueueByUserFeature.set(queueKey, queue);
+    }
+
+    if (matchedReservation) {
+      // Counter was already atomically incremented in `reserveFeatureQuota` — commit without double-counting!
+      matchedReservation.status = 'COMMITTED';
+      matchedReservation.committedAt = new Date().toISOString();
+      reservationsById.set(matchedReservation.reservationId, matchedReservation);
+      const filteredQueue = (pendingReservationQueueByUserFeature.get(queueKey) || []).filter(
+        (id) => id !== matchedReservation!.reservationId
+      );
+      pendingReservationQueueByUserFeature.set(queueKey, filteredQueue);
+      usage.activeReservationsCount = Math.max(0, (usage.activeReservationsCount || 1) - 1);
+    } else {
+      // Direct call without prior reservation: enforce limit and increment atomically
+      const { used, limit } = getFeatureUsageAndLimit(usage, plan, feature);
+      if (used < limit) {
+        mutateFeatureCounter(usage, feature, 1);
+      }
+    }
+
+    usage.totalTokensEstimated += Math.max(0, estimatedTokens);
+    usage.totalEstimatedCostUsd = Number(
+      (usage.totalEstimatedCostUsd + Math.max(0, estimatedCostUsd)).toFixed(6)
+    );
+    return usage;
+  });
+}
+
 export function acquireConcurrency(userId: string): {
   allowed: boolean;
   current: number;
   max: number;
   error?: string;
 } {
-  const cleanId = (userId || 'anonymous').trim();
-  const sub = getUserSubscription(cleanId);
-  const plan = SPARK_SUBSCRIPTION_PLANS[sub.planId] || SPARK_SUBSCRIPTION_PLANS.free;
-  const current = activeConcurrencyByUser.get(cleanId) || 0;
+  const status = getUserQuotaStatus(userId);
+  const current = activeConcurrencyByUserId.get(userId) || 0;
+  const max = status.limits.concurrency;
 
-  if (current >= plan.maxConcurrency) {
+  if (current >= max) {
     return {
       allowed: false,
       current,
-      max: plan.maxConcurrency,
-      error: `Concurrency limit reached (${current}/${plan.maxConcurrency} active workflows). Wait for current workflows to complete or upgrade your plan.`,
+      max,
+      error: `Maximum concurrent workflows (${max}) reached for your ${status.plan.name}. Please wait for your active search to complete or upgrade your tier.`,
     };
   }
 
-  const updated = current + 1;
-  activeConcurrencyByUser.set(cleanId, updated);
-  return {
-    allowed: true,
-    current: updated,
-    max: plan.maxConcurrency,
-  };
-}
-
-/**
- * Concurrency Limiter: Release execution slot when workflow completes or errors.
- */
-export function releaseConcurrency(userId: string): void {
-  const cleanId = (userId || 'anonymous').trim();
-  const current = activeConcurrencyByUser.get(cleanId) || 0;
-  if (current <= 1) {
-    activeConcurrencyByUser.delete(cleanId);
-  } else {
-    activeConcurrencyByUser.set(cleanId, current - 1);
-  }
-}
-
-const recordedOperationIds = new Set<string>();
-const dashboardPreferencesByUser = new Map<
-  string,
-  {
-    defaultTab: string;
-    pageSize: number;
-    quickFilterDefault?: string;
-    updatedAt: string;
-  }
->();
-
-
-/**
- * Record actual usage after successful execution with idempotency protection.
- */
-export function recordFeatureUsage(
-  userId: string,
-  feature: 'search' | 'analysis' | 'coupon' | 'workflow',
-  tokens = 0,
-  costUsd = 0,
-  operationId?: string
-): UserUsageQuotaRecord {
+  const next = current + 1;
+  activeConcurrencyByUserId.set(userId, next);
   const usage = getUserUsageRecord(userId);
-  if (operationId) {
-    const dedupKey = `${userId}:${feature}:${operationId}`;
-    if (recordedOperationIds.has(dedupKey)) {
-      return usage;
-    }
-    recordedOperationIds.add(dedupKey);
-  }
-
-  switch (feature) {
-    case 'search':
-      usage.searchesUsed += 1;
-      break;
-    case 'analysis':
-      usage.analysesUsed += 1;
-      break;
-    case 'coupon':
-      usage.couponsUsed += 1;
-      break;
-    case 'workflow':
-      usage.workflowsUsed += 1;
-      break;
-  }
-
-  if (tokens > 0) {
-    usage.totalTokensEstimated += tokens;
-  }
-  if (costUsd > 0) {
-    usage.totalEstimatedCostUsd = Number((usage.totalEstimatedCostUsd + costUsd).toFixed(4));
-  }
-  usage.updatedAt = new Date().toISOString();
-  return usage;
+  usage.activeWorkflowsCount = next;
+  usageByUserId.set(userId, usage);
+  return { allowed: true, current: next, max };
 }
 
-/**
- * Explicitly reset user's monthly quota for a new billing cycle while preserving historical records.
- */
-export function resetUserMonthlyQuota(
-  userId: string,
-  newPeriodMonth: string = getCurrentBillingPeriod()
-): UserUsageQuotaRecord {
-  const cleanId = (userId || 'anonymous').trim();
-  const sub = getUserSubscription(cleanId);
-  const key = `${cleanId}:${newPeriodMonth}`;
-  const freshRecord: UserUsageQuotaRecord = {
-    userId: cleanId,
-    planId: sub.status === 'expired' ? 'free' : sub.planId,
-    billingPeriodMonth: newPeriodMonth,
-    searchesUsed: 0,
-    analysesUsed: 0,
-    couponsUsed: 0,
-    workflowsUsed: 0,
-    activeWorkflowsCount: activeConcurrencyByUser.get(cleanId) || 0,
-    totalTokensEstimated: 0,
-    totalEstimatedCostUsd: 0,
-    lastResetAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  usageRecordsByUserMonth.set(key, freshRecord);
-  return freshRecord;
+export function releaseConcurrency(userId: string): void {
+  const current = activeConcurrencyByUserId.get(userId) || 0;
+  const next = Math.max(0, current - 1);
+  activeConcurrencyByUserId.set(userId, next);
+  const usage = getUserUsageRecord(userId);
+  usage.activeWorkflowsCount = next;
+  usageByUserId.set(userId, usage);
 }
 
-/**
- * Update or activate user subscription plan (handles activation, upgrade, and downgrade).
- */
 export function setUserSubscriptionPlan(
   userId: string,
   planId: SubscriptionPlanId,
-  paypalSubscriptionId: string | null = null,
-  paypalPlanId: string | null = null
+  options?: {
+    paypalSubscriptionId?: string | null;
+    paypalPlanId?: string | null;
+    status?: SubscriptionStatus;
+    cancelAtPeriodEnd?: boolean;
+  }
 ): UserSubscriptionRecord {
-  const cleanId = (userId || 'anonymous').trim();
-  const sub = getUserSubscription(cleanId);
-  const now = new Date();
-  const periodEnd = getBillingPeriodResetDate(now);
+  return runAtomicQuotaTransaction(userId, ({ subscription: current, usage }) => {
+    const now = new Date().toISOString();
+    current.id =
+      options?.paypalSubscriptionId ||
+      (current.id.startsWith('sub_free_') ? `sub_${planId}_${userId.slice(0, 12)}` : current.id);
+    current.userId = userId;
+    current.planId = planId;
+    current.status = options?.status || 'active';
+    current.currentPeriodStart = now;
+    current.currentPeriodEnd = getNextMonthResetIso();
+    current.cancelAtPeriodEnd = options?.cancelAtPeriodEnd ?? false;
+    current.paypalSubscriptionId =
+      options?.paypalSubscriptionId !== undefined
+        ? options.paypalSubscriptionId
+        : current.paypalSubscriptionId;
+    current.paypalPlanId =
+      options?.paypalPlanId !== undefined ? options.paypalPlanId : current.paypalPlanId;
+    current.updatedAt = now;
 
-  sub.planId = planId;
-  sub.status = 'active';
-  sub.cancelAtPeriodEnd = false;
-  sub.currentPeriodStart = now.toISOString();
-  sub.currentPeriodEnd = periodEnd;
-  if (paypalSubscriptionId !== null) {
-    sub.paypalSubscriptionId = paypalSubscriptionId;
-  }
-  if (paypalPlanId !== null) {
-    sub.paypalPlanId = paypalPlanId;
-  }
-  sub.updatedAt = now.toISOString();
+    usage.planId =
+      current.status === 'active' || current.status === 'trialing' ? planId : 'free';
 
-  // Also update usage planId
-  const usage = getUserUsageRecord(cleanId);
-  usage.planId = planId;
-  usage.updatedAt = now.toISOString();
-
-  subscriptionsByUser.set(cleanId, sub);
-  return sub;
+    return { ...current };
+  });
 }
 
-/**
- * Mark subscription cancelled (active until currentPeriodEnd).
- */
 export function cancelSubscription(userId: string): UserSubscriptionRecord {
-  const cleanId = (userId || 'anonymous').trim();
-  const sub = getUserSubscription(cleanId);
-  sub.cancelAtPeriodEnd = true;
-  sub.status = 'cancelled';
-  sub.updatedAt = new Date().toISOString();
-  subscriptionsByUser.set(cleanId, sub);
-  return sub;
+  return runAtomicQuotaTransaction(userId, ({ subscription: current }) => {
+    current.cancelAtPeriodEnd = true;
+    current.status = 'cancelled';
+    current.updatedAt = new Date().toISOString();
+    return { ...current };
+  });
 }
 
-/**
- * Handle subscription expiration at end of period: downgrades active quota tier to free
- * without restricting user access to their saved data.
- */
 export function expireSubscription(userId: string): UserSubscriptionRecord {
-  const cleanId = (userId || 'anonymous').trim();
-  const sub = getUserSubscription(cleanId);
-  sub.status = 'expired';
-  sub.planId = 'free';
-  sub.cancelAtPeriodEnd = false;
-  sub.updatedAt = new Date().toISOString();
-  const usage = getUserUsageRecord(cleanId);
-  usage.planId = 'free';
-  usage.updatedAt = new Date().toISOString();
-  subscriptionsByUser.set(cleanId, sub);
-  return sub;
+  return runAtomicQuotaTransaction(userId, ({ subscription: current, usage }) => {
+    current.status = 'expired';
+    current.planId = 'free';
+    current.cancelAtPeriodEnd = false;
+    current.updatedAt = new Date().toISOString();
+    usage.planId = 'free';
+    return { ...current };
+  });
 }
 
-/**
- * Handle failed subscription renewal (marks status past_due).
- */
 export function markSubscriptionFailedRenewal(userId: string): UserSubscriptionRecord {
-  const cleanId = (userId || 'anonymous').trim();
-  const sub = getUserSubscription(cleanId);
-  sub.status = 'past_due';
-  sub.updatedAt = new Date().toISOString();
-  subscriptionsByUser.set(cleanId, sub);
-  return sub;
+  return runAtomicQuotaTransaction(userId, ({ subscription: current, usage }) => {
+    current.status = 'past_due';
+    current.updatedAt = new Date().toISOString();
+    usage.planId = 'free';
+    return { ...current };
+  });
 }
 
-/**
- * Record a billing ledger entry for payment history in AG Grid.
- */
-export function recordSubscriptionPayment(record: SubscriptionPaymentRecord): void {
-  subscriptionPayments.unshift(record);
+export function recordSubscriptionPayment(
+  payment: ExtendedSubscriptionPaymentRecord
+): ExtendedSubscriptionPaymentRecord {
+  const list = paymentsByUserId.get(payment.userId) || [];
+  const idx = list.findIndex(
+    (p) => p.id === payment.id || p.paypalTransactionId === payment.paypalTransactionId
+  );
+  if (idx >= 0) {
+    list[idx] = payment;
+  } else {
+    list.unshift(payment);
+  }
+  paymentsByUserId.set(payment.userId, list);
+  notifyPaymentCommitted(payment);
+  return payment;
 }
 
-/**
- * Update status of an existing subscription payment (e.g., REFUNDED or FAILED).
- */
 export function updateSubscriptionPaymentStatus(
+  userId: string,
   paypalTransactionId: string,
-  status: 'COMPLETED' | 'PENDING' | 'FAILED' | 'REFUNDED'
-): SubscriptionPaymentRecord | null {
-  const found = subscriptionPayments.find(
+  status: SubscriptionPaymentRecord['status']
+): ExtendedSubscriptionPaymentRecord | null {
+  const list = paymentsByUserId.get(userId) || [];
+  const found = list.find(
     (p) => p.paypalTransactionId === paypalTransactionId || p.id === paypalTransactionId
   );
-  if (found) {
-    found.status = status;
-    return found;
-  }
-  return null;
+  if (!found) return null;
+  found.status = status;
+  paymentsByUserId.set(userId, list);
+  notifyPaymentCommitted(found);
+  return found;
 }
 
-/**
- * Retrieve payment history for user.
- */
-export function getSubscriptionPayments(userId?: string): SubscriptionPaymentRecord[] {
-  if (!userId) return [...subscriptionPayments];
-  return subscriptionPayments.filter((p) => p.userId === userId);
+export function getSubscriptionPayments(userId: string): ExtendedSubscriptionPaymentRecord[] {
+  return paymentsByUserId.get(userId) || [];
 }
 
-/**
- * Save and retrieve persistent AG Grid dashboard preferences per user.
- */
-export function saveUserDashboardPreferences(
-  userId: string,
-  prefs: { defaultTab: string; pageSize: number; quickFilterDefault?: string }
-) {
-  const cleanId = (userId || 'anonymous').trim();
-  const record = {
-    defaultTab: prefs.defaultTab || 'saved_products',
-    pageSize: Number(prefs.pageSize) || 10,
-    quickFilterDefault: prefs.quickFilterDefault || '',
-    updatedAt: new Date().toISOString(),
-  };
-  dashboardPreferencesByUser.set(cleanId, record);
-  return record;
-}
-
-export function getUserDashboardPreferences(userId: string) {
-  const cleanId = (userId || 'anonymous').trim();
-  return (
-    dashboardPreferencesByUser.get(cleanId) || {
-      defaultTab: 'saved_products',
-      pageSize: 10,
-      quickFilterDefault: '',
-      updatedAt: new Date().toISOString(),
-    }
-  );
-}
-
-/**
- * Delete all subscription & quota data for a specific user (GDPR / Account Deletion).
- */
-export function deleteUserSubscriptionData(userId: string): void {
-  const cleanId = (userId || 'anonymous').trim();
-  subscriptionsByUser.delete(cleanId);
-  activeConcurrencyByUser.delete(cleanId);
-  dashboardPreferencesByUser.delete(cleanId);
-  for (const key of Array.from(usageRecordsByUserMonth.keys())) {
-    if (key.startsWith(`${cleanId}:`)) {
-      usageRecordsByUserMonth.delete(key);
-    }
-  }
-}
-
-/**
- * State serialization for data persistence.
- */
-export function exportAllSubscriptionData() {
+export function exportAllSubscriptionData(): {
+  subscriptions: Array<[string, UserSubscriptionRecord]>;
+  usage: Array<[string, ExtendedUserUsageQuotaRecord]>;
+  payments: Array<[string, ExtendedSubscriptionPaymentRecord[]]>;
+  dashboardPreferences: Array<[string, UserDashboardPreferences]>;
+} {
   return {
-    subscriptions: Array.from(subscriptionsByUser.values()),
-    usage: Array.from(usageRecordsByUserMonth.values()),
-    payments: [...subscriptionPayments],
-    dashboardPreferences: Array.from(dashboardPreferencesByUser.entries()),
+    subscriptions: Array.from(subscriptionsByUserId.entries()),
+    usage: Array.from(usageByUserId.entries()),
+    payments: Array.from(paymentsByUserId.entries()),
+    dashboardPreferences: Array.from(dashboardPrefsByUserId.entries()),
   };
 }
 
-/**
- * State hydration from snapshot.
- */
 export function importSubscriptionData(data?: {
-  subscriptions?: UserSubscriptionRecord[];
-  usage?: UserUsageQuotaRecord[];
-  payments?: SubscriptionPaymentRecord[];
-  dashboardPreferences?: [string, { defaultTab: string; pageSize: number; quickFilterDefault?: string; updatedAt: string }][];
+  subscriptions?: Array<[string, UserSubscriptionRecord]>;
+  usage?: Array<[string, Partial<ExtendedUserUsageQuotaRecord> & UserUsageQuotaRecord]>;
+  payments?: Array<[string, ExtendedSubscriptionPaymentRecord[]]>;
+  dashboardPreferences?: Array<[string, UserDashboardPreferences]>;
 }): void {
   if (!data) return;
   if (Array.isArray(data.subscriptions)) {
-    for (const sub of data.subscriptions) {
-      if (sub && sub.userId) {
-        subscriptionsByUser.set(sub.userId, sub);
-      }
+    for (const [k, v] of data.subscriptions) {
+      if (k && v) subscriptionsByUserId.set(k, v);
     }
   }
   if (Array.isArray(data.usage)) {
-    for (const rec of data.usage) {
-      if (rec && rec.userId && rec.billingPeriodMonth) {
-        usageRecordsByUserMonth.set(`${rec.userId}:${rec.billingPeriodMonth}`, rec);
+    for (const [k, v] of data.usage) {
+      if (k && v) {
+        usageByUserId.set(k, {
+          ...v,
+          activeWorkflowsCount: 0,
+          revision: typeof v.revision === 'number' && v.revision >= 1 ? v.revision : 1,
+          activeReservationsCount: 0,
+        });
       }
     }
   }
   if (Array.isArray(data.payments)) {
-    subscriptionPayments.length = 0;
-    subscriptionPayments.push(...data.payments);
+    for (const [k, v] of data.payments) {
+      if (k && Array.isArray(v)) paymentsByUserId.set(k, v);
+    }
   }
   if (Array.isArray(data.dashboardPreferences)) {
-    for (const [uid, pref] of data.dashboardPreferences) {
-      if (uid && pref) {
-        dashboardPreferencesByUser.set(uid, pref);
-      }
+    for (const [k, v] of data.dashboardPreferences) {
+      if (k && v) dashboardPrefsByUserId.set(k, v);
+    }
+  }
+}
+
+export function deleteUserSubscriptionData(userId: string): void {
+  subscriptionsByUserId.delete(userId);
+  usageByUserId.delete(userId);
+  paymentsByUserId.delete(userId);
+  activeConcurrencyByUserId.delete(userId);
+  dashboardPrefsByUserId.delete(userId);
+  for (const [resId, entry] of Array.from(reservationsById.entries())) {
+    if (entry.userId === userId) {
+      reservationsById.delete(resId);
+    }
+  }
+  for (const key of Array.from(pendingReservationQueueByUserFeature.keys())) {
+    if (key.startsWith(`${userId}:`)) {
+      pendingReservationQueueByUserFeature.delete(key);
     }
   }
 }

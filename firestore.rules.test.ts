@@ -66,6 +66,13 @@ test('firestore.rules enforces all 8 pillars and rejects all Dirty Dozen payload
   assert.ok(rulesText.includes('isValidConversation(incoming())'));
   assert.ok(rulesText.includes('isValidPurchase(incoming())'));
   assert.ok(rulesText.includes('isValidUserCart(incoming())'));
+  assert.ok(rulesText.includes('isValidUserSubscription(incoming())'));
+  assert.ok(rulesText.includes('isValidUserUsageQuota(incoming())'));
+  assert.ok(rulesText.includes('isValidSubscriptionPayment(incoming())'));
+  assert.ok(rulesText.includes('isValidSubscriptionApproval(incoming())'));
+  assert.ok(rulesText.includes('match /usage_quotas/{periodId}'));
+  assert.ok(rulesText.includes('match /subscription_payments/{paymentId}'));
+  assert.ok(rulesText.includes('match /subscription_approvals/{subscriptionId}'));
   assert.ok(rulesText.includes("cartId == 'current'"));
   assert.ok(rulesText.includes('incoming().revision >= existing().revision'));
   assert.ok(rulesText.includes("existing().status == 'pending'"));
